@@ -1,0 +1,71 @@
+{
+  "_comment": "Copy to config.json and fill in your values. Sensitive fields should go in .env instead.",
+
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "runs/consistency",
+
+  "_comment_endpoints": "Override if your solution uses different API paths.",
+  "endpoints": {
+    "submit": "/analyse/cr",
+    "poll": "/analyse/cr/{run_id}",
+    "delete": "/analyse/cr/{run_id}"
+  },
+
+  "_comment_schema": "Map generic field names to your solution's actual response field names.",
+  "response_schema": {
+    "tests_field": "test_cases",
+    "test_id_field": "test_id",
+    "action_field": "recommended_action",
+    "score_field": "composite_score",
+    "risk_field": "overall_risk",
+    "gaps_field": "coverage_gaps",
+    "gap_component_field": "component",
+    "summary_field": "summary",
+    "count_fields": {
+      "must_run": "must_run",
+      "should_run": "should_run",
+      "consider": "consider",
+      "exclude": "exclude",
+      "coverage_gaps": "coverage_gaps",
+      "new_test_cases": "new_test_cases"
+    }
+  },
+
+  "selector": {
+    "_comment": "mode=inline reads a local JSON file. mode=ado fetches from Azure DevOps via integration-service.",
+    "mode": "inline",
+    "cr_file": "examples/sample_cr.json",
+
+    "_comment_ado": "Fill these in if using mode=ado (or set via env vars ADO_BASE_URL, ADO_PROJECT_KEY, ADO_TOKEN).",
+    "cr_id": "123",
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "",
+    "integration_project": "",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 15,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 600.0
+  },
+
+  "evaluator": {
+    "_comment": "Weights must sum to 1.0. Adjust to reflect what matters most for your solution.",
+    "weights": {
+      "test_set_stability":              0.30,
+      "action_agreement":                0.25,
+      "score_stability":                 0.15,
+      "ranking_stability":               0.10,
+      "risk_agreement":                  0.10,
+      "summary_stability":               0.05,
+      "coverage_gap_stability":          0.03,
+      "generated_test_case_consistency": 0.02
+    }
+  }
+}

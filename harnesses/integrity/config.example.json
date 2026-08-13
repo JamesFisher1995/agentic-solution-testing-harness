@@ -1,0 +1,77 @@
+{
+  "_comment": "Copy to config.json and fill in your values.",
+
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "runs/integrity",
+
+  "endpoints": {
+    "submit": "/analyse/cr",
+    "poll": "/analyse/cr/{run_id}",
+    "delete": "/analyse/cr/{run_id}",
+    "fetch_cr": "/cr/{tool}/{cr_id}",
+    "fetch_tests": "/test-cases/ado"
+  },
+
+  "_comment_schema": "Map generic field names to your solution's actual response field names.",
+  "response_schema": {
+    "risk_field": "overall_risk",
+    "action_field": "recommended_action",
+    "tests_field": "test_cases",
+    "generated_tcs_field": "generated_test_cases"
+  },
+
+  "selector": {
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "",
+    "integration_project": "",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 1200.0
+  },
+
+  "_comment_crs": "Define one entry per CR to test. Each CR has checks that define what 'correct' looks like.",
+  "crs": [
+    {
+      "cr_id": "158",
+      "label": "CR-011",
+      "_comment": "low_impact CRs: AI must NOT hallucinate Must/Should Run tests or high risk.",
+      "type": "low_impact",
+      "checks": {
+        "risk_must_be": "Low",
+        "must_run_max": 0,
+        "should_run_max": 0,
+        "generated_tcs_max": 1
+      }
+    },
+    {
+      "cr_id": "160",
+      "label": "CR-013",
+      "type": "low_impact",
+      "checks": {
+        "risk_must_be": "Low",
+        "must_run_max": 0,
+        "should_run_max": 0,
+        "generated_tcs_max": 0
+      }
+    },
+    {
+      "cr_id": "159",
+      "label": "CR-012",
+      "_comment": "high_impact CRs: AI must return high/critical risk and must NOT exclude tests.",
+      "type": "high_impact",
+      "checks": {
+        "risk_must_be": "Critical",
+        "exclude_max": 0
+      }
+    }
+  ]
+}

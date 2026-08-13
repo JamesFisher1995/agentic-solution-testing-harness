@@ -1,0 +1,71 @@
+{
+  "_comment": "Copy to config.json and fill in your values.",
+
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "runs/completeness",
+
+  "endpoints": {
+    "submit": "/analyse/cr",
+    "poll": "/analyse/cr/{run_id}",
+    "delete": "/analyse/cr/{run_id}",
+    "fetch_cr": "/cr/{tool}/{cr_id}",
+    "fetch_tests": "/test-cases/ado"
+  },
+
+  "response_schema": {
+    "tests_field": "test_cases",
+    "test_id_field": "test_id",
+    "action_field": "recommended_action",
+    "gaps_field": "coverage_gaps",
+    "gap_component_field": "component",
+    "generated_tcs_field": "generated_test_cases"
+  },
+
+  "selector": {
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "",
+    "integration_project": "",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 1200.0
+  },
+
+  "thresholds": {
+    "recall_min": 0.90,
+    "gap_recall_min": 0.80
+  },
+
+  "_comment_crs": "Each CR defines a gold standard. must_flag = tests that must be flagged. must_not_exclude = tests that must never be excluded. must_find_gaps = coverage gaps that must be identified.",
+  "crs": [
+    {
+      "cr_id": "159",
+      "label": "CR-012",
+      "gold_standard": {
+        "rationale": "Cross-cutting design system change — all tests exercising any rendered page should be flagged.",
+        "must_flag": [
+          "TC-001: UI Components Verification",
+          "TC-002: Happy Path Application Submission",
+          "TC-003: Landing Page Navigation"
+        ],
+        "must_not_exclude": [
+          "TC-001: UI Components Verification",
+          "TC-002: Happy Path Application Submission",
+          "TC-003: Landing Page Navigation"
+        ],
+        "must_find_gaps": [
+          "Step 3",
+          "Step 4"
+        ]
+      }
+    }
+  ]
+}
