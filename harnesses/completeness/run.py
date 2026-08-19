@@ -77,6 +77,10 @@ def load_config(path: str, iterations_override: int | None = None) -> dict:
         cfg = json.load(fh)
     if iterations_override is not None:
         cfg["runner"]["iterations"] = iterations_override
+    sel = cfg.setdefault("selector", {})
+    sel["integration_url"] = os.getenv("ADO_BASE_URL", sel.get("integration_url", ""))
+    sel["integration_project"] = os.getenv("ADO_PROJECT_KEY", sel.get("integration_project", ""))
+    sel["integration_token"] = os.getenv("ADO_TOKEN", sel.get("integration_token", ""))
     return cfg
 
 

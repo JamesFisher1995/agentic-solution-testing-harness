@@ -1,0 +1,72 @@
+{
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "runs/completeness",
+
+  "selector": {
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "https://dev.azure.com/qea",
+    "integration_project": "Defra QA Assurance",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 1200.0
+  },
+
+  "thresholds": {
+    "recall_min": 0.90,
+    "gap_recall_min": 0.80
+  },
+
+  "crs": [
+    {
+      "cr_id": "159",
+      "label": "CR-012",
+      "gold_standard": {
+        "rationale": "Cross-cutting GOV.UK Design System migration affects every page.",
+        "must_flag": [
+          "TC-001: UI Components Verification",
+          "TC-002: Happy Path Application Submission",
+          "TC-003: Landing Page Navigation",
+          "TC-007: Progress Indicator Consistency",
+          "TC-009: Layout - Responsive Design"
+        ],
+        "must_not_exclude": [
+          "TC-001: UI Components Verification",
+          "TC-002: Happy Path Application Submission",
+          "TC-003: Landing Page Navigation",
+          "TC-007: Progress Indicator Consistency",
+          "TC-009: Layout - Responsive Design"
+        ],
+        "must_find_gaps": ["Step 3", "Step 4"]
+      }
+    },
+    {
+      "cr_id": "161",
+      "label": "CR-014",
+      "gold_standard": {
+        "rationale": "Critical security fix — personal data exposed in URL parameters.",
+        "must_flag": [
+          "TC-002: Happy Path Application Submission",
+          "TC-004: Validation - Step 1: Personal Details",
+          "TC-005: Validation - Step 2: Contact Information",
+          "TC-010: Confirmation Page Summary Details"
+        ],
+        "must_not_exclude": [
+          "TC-002: Happy Path Application Submission",
+          "TC-004: Validation - Step 1: Personal Details",
+          "TC-005: Validation - Step 2: Contact Information",
+          "TC-010: Confirmation Page Summary Details"
+        ],
+        "must_find_gaps": ["Step 3", "Data transmission"]
+      }
+    }
+  ]
+}

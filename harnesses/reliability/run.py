@@ -273,7 +273,7 @@ def render_scenario_section(scenario: dict, outcomes: list[RunOutcome]) -> list[
     lines = []
     lines.append(f"  {scenario['label']}")
     lines.append(f"  CR: {scenario['cr_id']}   Expected Must Run: {scenario['expected_must_run']}")
-    lines.append(f"  Defect: {scenario['defect']}")
+    lines.append(f"  Defect: {scenario.get('defect', 'N/A')}")
     lines.append(f"  {'─' * 56}")
     lines.append(f"  Reliability score: {score:.3f}  [{_band(score)}]   ({len(passed)}/{total} passed)")
     lines.append("")
@@ -331,7 +331,7 @@ def render_json(scenario_results: list[dict], cfg: dict) -> dict:
             {
                 "label": r["scenario"]["label"],
                 "cr_id": r["scenario"]["cr_id"],
-                "defect": r["scenario"]["defect"],
+                "defect": r["scenario"].get("defect", ""),
                 "expected_must_run": r["scenario"]["expected_must_run"],
                 "iterations": len(r["outcomes"]),
                 "passed": sum(1 for o in r["outcomes"] if o.passed),
@@ -475,7 +475,7 @@ def render_docx(scenario_results: list[dict], cfg: dict, out_path: str) -> None:
         detail = doc.add_table(rows=3, cols=2)
         for row2, (label, value) in zip(detail.rows, [
             ("CR",              scenario["cr_id"]),
-            ("Defect",          scenario["defect"]),
+            ("Defect",          scenario.get("defect", "")),
             ("Expected Must Run", ", ".join(scenario["expected_must_run"])),
         ]):
             shade_cell(row2.cells[0], LGREY)
