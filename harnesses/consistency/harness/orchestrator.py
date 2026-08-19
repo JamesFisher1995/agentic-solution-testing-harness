@@ -30,7 +30,7 @@ from .agents.base import SelectedCR
 from .agents.evaluator import ConsistencyReport, EvaluatorAgent
 from .agents.runner import RunnerAgent, RunResult
 from .agents.selector import SelectorAgent
-from ....shared.client import SolutionClient as AnalyserClient
+from shared.client import SolutionClient as AnalyserClient
 from .config import Config, SelectorConfig
 from .report import render_summary_md, render_docx
 

@@ -66,7 +66,7 @@ class RunnerAgent(Agent):
         started = time.monotonic()
 
         try:
-            submit = await self.client.submit_cr(
+            submit = await self.client.submit(
                 cr_id=cr_id,
                 normalised_cr=selected.normalised_cr,
                 existing_tests=selected.existing_tests,
@@ -97,7 +97,7 @@ class RunnerAgent(Agent):
             await self._poll(res, cfg)
 
             if res.status in _DONE and res.report is not None and cfg.delete_runs_after:
-                await self.client.delete_run(run_id)
+                await self.client.delete(run_id)
         except Exception as exc:  # noqa: BLE001 — record, never crash the batch
             res.status = "error"
             res.error = f"{type(exc).__name__}: {exc}"
@@ -109,7 +109,7 @@ class RunnerAgent(Agent):
     async def _poll(self, res: RunResult, cfg: RunnerConfig) -> None:
         deadline = time.monotonic() + cfg.poll_timeout_sec
         while True:
-            row = await self.client.get_run(res.run_id)
+            row = await self.client.poll(res.run_id)
             status = row.get("status", "unknown")
             if status in _DONE:
                 res.status = status

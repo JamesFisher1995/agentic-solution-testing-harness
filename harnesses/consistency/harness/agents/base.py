@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from .....shared.client import SolutionClient as AnalyserClient
+from shared.client import SolutionClient as AnalyserClient
 
 
 class Agent:

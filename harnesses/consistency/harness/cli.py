@@ -18,11 +18,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 
-from .client import AnalyserClient
-from .config import Config
-from .orchestrator import Orchestrator
+# Add repo root to path so shared/ and harness package imports resolve
+_HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_HARNESS_DIR)))
+sys.path.insert(0, _REPO_ROOT)
+
+from shared.client import SolutionClient  # noqa: E402
+from shared.dotenv import load_dotenv  # noqa: E402
+from harnesses.consistency.harness.config import Config  # noqa: E402
+from harnesses.consistency.harness.orchestrator import Orchestrator  # noqa: E402
+
+load_dotenv(os.path.join(_REPO_ROOT, ".env"))
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -61,7 +70,7 @@ def _apply_overrides(cfg: Config, args: argparse.Namespace) -> None:
 
 
 async def _check_health(cfg: Config) -> int:
-    async with AnalyserClient(cfg.agent_base_url, cfg.integration_base_url, cfg.tenant_id) as c:
+    async with SolutionClient(cfg.agent_base_url, cfg.integration_base_url, cfg.tenant_id) as c:
         try:
             res = await c.health()
             print(f"OK  {cfg.agent_base_url}/health -> {res}")
