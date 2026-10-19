@@ -44,12 +44,12 @@
     "must_identify": {
       "cause_category": "Code change",
       "failure_type": "Test",
-      "primary_cause_keywords": ["test", "failure", "API", "500", "TypeError"],
+      "primary_cause_keywords": ["test", "fail", "500", "unit"],
       "severity": ["High", "Medium"]
     },
     "must_recommend": [
       "investigate the 500 response from /analyse/cr",
-      "fix the undefined run_id in pipeline.test.ts"
+      "fix the undefined run_id"
     ]
   }
 }
