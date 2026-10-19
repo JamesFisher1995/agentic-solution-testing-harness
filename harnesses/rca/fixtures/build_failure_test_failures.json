@@ -1,0 +1,55 @@
+{
+  "label": "Jest unit test failures — API integration tests",
+  "ado_run_id": "400",
+  "pipeline_id": "9",
+  "pipeline_name": "agentic-ai-stlc (9)",
+  "trigger_type": "manual",
+  "trigger_ref": "feature/new-api",
+  "triggered_by": "James Fisher",
+  "build_duration_ms": 87400,
+  "repo_name": "agentic-ai-stlc",
+  "branch": "feature/new-api",
+  "commit_sha": "d9f23a1bc450e789f01234abcdef5678",
+  "failed_stages": ["Test Stage"],
+  "failed_tasks": [
+    {
+      "task_name": "Run unit tests",
+      "stage": "Test Stage",
+      "job": "Test",
+      "exit_code": "1",
+      "raw_log": "2026-10-19T20:00:00.0000000Z ##[section]Starting: Run unit tests\n2026-10-19T20:00:00.0000000Z ==============================================================================\n2026-10-19T20:00:00.0000000Z Task         : Command line\n2026-10-19T20:00:00.0000000Z Description  : Run a command line script using Bash on Linux and macOS\n2026-10-19T20:00:00.0000000Z Version      : 2.280.0\n2026-10-19T20:00:00.0000000Z ==============================================================================\n2026-10-19T20:00:01.0000000Z [command]/usr/bin/bash --noprofile --norc /home/vsts/work/_temp/run_tests.sh\n2026-10-19T20:00:02.0000000Z PASS src/api/health.test.ts\n2026-10-19T20:00:03.0000000Z FAIL src/api/analyse.test.ts\n2026-10-19T20:00:03.0000000Z   ● POST /analyse/cr › should return 202 with run_id\n2026-10-19T20:00:03.0000000Z     expect(received).toBe(expected)\n2026-10-19T20:00:03.0000000Z     Expected: 202\n2026-10-19T20:00:03.0000000Z     Received: 500\n2026-10-19T20:00:04.0000000Z FAIL src/api/pipeline.test.ts\n2026-10-19T20:00:04.0000000Z   ● POST /analyse/pipeline-failure › should queue RCA run\n2026-10-19T20:00:04.0000000Z     TypeError: Cannot read properties of undefined (reading 'run_id')\n2026-10-19T20:00:04.0000000Z       at Object.<anonymous> (src/api/pipeline.test.ts:34:22)\n2026-10-19T20:00:05.0000000Z Test Suites: 2 failed, 1 passed, 3 total\n2026-10-19T20:00:05.0000000Z Tests:       2 failed, 8 passed, 10 total\n2026-10-19T20:00:05.0000000Z ##[error]Bash exited with code '1'.\n2026-10-19T20:00:05.0000000Z ##[section]Finishing: Run unit tests"
+    }
+  ],
+  "failing_tests": [
+    {
+      "name": "POST /analyse/cr › should return 202 with run_id",
+      "error_message": "expect(received).toBe(expected)\nExpected: 202\nReceived: 500",
+      "stack_trace": "at Object.<anonymous> (src/api/analyse.test.ts:28:5)",
+      "duration_ms": 312,
+      "is_expected_fail": false,
+      "is_flaky": false
+    },
+    {
+      "name": "POST /analyse/pipeline-failure › should queue RCA run",
+      "error_message": "TypeError: Cannot read properties of undefined (reading 'run_id')",
+      "stack_trace": "at Object.<anonymous> (src/api/pipeline.test.ts:34:22)",
+      "duration_ms": 188,
+      "is_expected_fail": false,
+      "is_flaky": false
+    }
+  ],
+  "total_failing_tests": 2,
+  "gold_standard": {
+    "rationale": "Two API integration tests fail with a 500 response and a TypeError — strongly suggests a code change broke the API contract.",
+    "must_identify": {
+      "cause_category": "Code change",
+      "failure_type": "Test",
+      "primary_cause_keywords": ["test", "failure", "API", "500", "TypeError"],
+      "severity": ["High", "Medium"]
+    },
+    "must_recommend": [
+      "investigate the 500 response from /analyse/cr",
+      "fix the undefined run_id in pipeline.test.ts"
+    ]
+  }
+}
