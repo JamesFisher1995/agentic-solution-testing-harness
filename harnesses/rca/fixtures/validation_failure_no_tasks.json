@@ -1,0 +1,24 @@
+{
+  "label": "Pipeline validation failure — no tasks executed",
+  "ado_run_id": "320",
+  "pipeline_id": "9",
+  "pipeline_name": "agentic-ai-stlc (9)",
+  "trigger_type": "manual",
+  "trigger_ref": "main",
+  "triggered_by": "James Fisher",
+  "build_duration_ms": 1200,
+  "repo_name": "agentic-ai-stlc",
+  "branch": "main",
+  "commit_sha": "abc123def456",
+  "failed_stages": [],
+  "failed_tasks": [],
+  "failing_tests": [],
+  "total_failing_tests": 0,
+  "description": "Pipeline failed at ADO validation before any tasks ran — required parameters dbUser and dbPassword were missing. No task logs exist.",
+  "integrity_assertions": {
+    "expected_status": "failed",
+    "must_not_have_report": true,
+    "error_message_must_contain": ["Insufficient data", "failed before any tasks"],
+    "must_not_contain": ["TypeScript", "compilation", "componentx", "type mismatch", "fix recommendation"]
+  }
+}
