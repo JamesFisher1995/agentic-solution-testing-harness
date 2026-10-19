@@ -1,0 +1,38 @@
+{
+  "label": "TypeScript compilation error — missing component and type mismatch",
+  "ado_run_id": "334",
+  "pipeline_id": "9",
+  "pipeline_name": "agentic-ai-stlc (9)",
+  "trigger_type": "manual",
+  "trigger_ref": "main",
+  "triggered_by": "James Fisher",
+  "build_duration_ms": 33261,
+  "repo_name": "agentic-ai-stlc",
+  "branch": "main",
+  "commit_sha": "c59bc9b7eb14f7b703d10b0c88493ec395f49bab",
+  "failed_stages": ["Build Stage"],
+  "failed_tasks": [
+    {
+      "task_name": "Build monorepo",
+      "stage": "Build Stage",
+      "job": "Build",
+      "exit_code": "1",
+      "raw_log": "2026-10-19T18:08:18.9072141Z ##[section]Starting: Build monorepo\n2026-10-19T18:08:18.9079399Z ==============================================================================\n2026-10-19T18:08:18.9079554Z Task         : Command line\n2026-10-19T18:08:18.9079638Z Description  : Run a command line script using Bash on Linux and macOS and cmd.exe on Windows\n2026-10-19T18:08:18.9079786Z Version      : 2.280.0\n2026-10-19T18:08:18.9079867Z Author       : Microsoft Corporation\n2026-10-19T18:08:18.9079965Z Help         : https://docs.microsoft.com/azure/devops/pipelines/tasks/utility/command-line\n2026-10-19T18:08:18.9080091Z ==============================================================================\n2026-10-19T18:08:18.9564848Z [Host] Selected Node version: Node24 (Strategy: Node24Strategy)\n2026-10-19T18:08:19.3244948Z Generating script.\n2026-10-19T18:08:19.3254778Z ========================== Starting Command Output ===========================\n2026-10-19T18:08:19.3266659Z [command]/usr/bin/bash --noprofile --norc /home/vsts/work/_temp/37abe58a-399b-4ea5-be27-9caf51719eb6.sh\n2026-10-19T18:08:19.3335894Z ERROR: TypeScript compilation failed\n2026-10-19T18:08:19.3336659Z src/app/page.tsx(3,1): error TS2304: Cannot find name ComponentX.\n2026-10-19T18:08:19.3337530Z src/lib/utils.ts(12,5): error TS2322: Type string is not assignable to type number.\n2026-10-19T18:08:19.3339143Z Found 2 errors.\n2026-10-19T18:08:19.3355553Z \n2026-10-19T18:08:19.3378244Z ##[error]Bash exited with code '1'.\n2026-10-19T18:08:19.3427294Z ##[section]Finishing: Build monorepo"
+    }
+  ],
+  "failing_tests": [],
+  "total_failing_tests": 0,
+  "gold_standard": {
+    "rationale": "TypeScript compilation failure with two clear errors in specific files.",
+    "must_identify": {
+      "cause_category": "Code change",
+      "primary_cause_keywords": ["TypeScript", "compilation", "ComponentX", "type mismatch"],
+      "failed_files": ["src/app/page.tsx", "src/lib/utils.ts"],
+      "severity": ["High", "Medium"]
+    },
+    "must_recommend": [
+      "fix ComponentX import or definition",
+      "fix type mismatch in utils.ts"
+    ]
+  }
+}

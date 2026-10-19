@@ -1,0 +1,27 @@
+{
+  "agent_base_url": "http://localhost:8000",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "runs/rca/consistency",
+
+  "runner": {
+    "iterations": 5,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 300.0
+  },
+
+  "evaluator": {
+    "weights": {
+      "cause_category_agreement": 0.35,
+      "severity_agreement":       0.25,
+      "primary_cause_similarity": 0.25,
+      "confidence_stability":     0.15
+    }
+  },
+
+  "fixtures": [
+    {
+      "label": "TypeScript compilation error",
+      "file": "harnesses/rca/fixtures/build_334_typescript_error.json"
+    }
+  ]
+}
