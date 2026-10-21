@@ -22,6 +22,14 @@
     {
       "label": "TypeScript compilation error",
       "file": "harnesses/rca/fixtures/build_334_typescript_error.json"
+    },
+    {
+      "label": "Single ESLint error",
+      "file": "harnesses/rca/fixtures/build_single_error.json"
+    },
+    {
+      "label": "Four TypeScript errors",
+      "file": "harnesses/rca/fixtures/build_four_errors.json"
     }
   ]
 }

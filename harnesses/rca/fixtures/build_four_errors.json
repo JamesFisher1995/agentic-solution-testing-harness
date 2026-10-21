@@ -1,0 +1,40 @@
+{
+  "label": "Four TypeScript errors across multiple files",
+  "ado_run_id": "420",
+  "pipeline_id": "9",
+  "pipeline_name": "agentic-ai-stlc (9)",
+  "trigger_type": "manual",
+  "trigger_ref": "feature/api-refactor",
+  "triggered_by": "James Fisher",
+  "build_duration_ms": 34600,
+  "repo_name": "agentic-ai-stlc",
+  "branch": "feature/api-refactor",
+  "commit_sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+  "failed_stages": ["Build Stage"],
+  "failed_tasks": [
+    {
+      "task_name": "Build monorepo",
+      "stage": "Build Stage",
+      "job": "Build",
+      "exit_code": "1",
+      "raw_log": "2026-10-21T10:00:00.0000000Z ##[section]Starting: Build monorepo\n2026-10-21T10:00:00.0000000Z ==============================================================================\n2026-10-21T10:00:00.0000000Z Task         : Command line\n2026-10-21T10:00:00.0000000Z Description  : Run a command line script using Bash on Linux and macOS\n2026-10-21T10:00:00.0000000Z Version      : 2.280.0\n2026-10-21T10:00:00.0000000Z ==============================================================================\n2026-10-21T10:00:01.0000000Z [command]/usr/bin/bash --noprofile --norc /home/vsts/work/_temp/build.sh\n2026-10-21T10:00:02.0000000Z ERROR: TypeScript compilation failed\n2026-10-21T10:00:02.0000000Z src/api/crRoutes.ts(8,14): error TS2305: Module '\"./crService\"' has no exported member 'CrPayload'.\n2026-10-21T10:00:02.0000000Z src/api/crRoutes.ts(45,22): error TS2339: Property 'tenantId' does not exist on type 'Request'.\n2026-10-21T10:00:02.0000000Z src/services/crService.ts(23,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.\n2026-10-21T10:00:02.0000000Z src/models/CrModel.ts(11,3): error TS2741: Property 'status' is missing in type '{}' but required in type 'CrRecord'.\n2026-10-21T10:00:02.0000000Z Found 4 errors.\n2026-10-21T10:00:02.0000000Z ##[error]Bash exited with code '1'.\n2026-10-21T10:00:03.0000000Z ##[section]Finishing: Build monorepo"
+    }
+  ],
+  "failing_tests": [],
+  "total_failing_tests": 0,
+  "gold_standard": {
+    "rationale": "Four distinct TypeScript errors across four files introduced by an API refactor — tests the agent's ability to enumerate all errors without collapsing.",
+    "must_identify": {
+      "cause_category": "Code change",
+      "failure_type": "Build",
+      "primary_cause_keywords": ["CrPayload", "tenantId", "crService", "CrModel"],
+      "severity": ["High"]
+    },
+    "must_recommend": [
+      "export CrPayload from crService",
+      "add tenantId to the Request type",
+      "fix the undefined type in crService.ts",
+      "add the missing status property to CrModel"
+    ]
+  }
+}
