@@ -1,0 +1,13 @@
+# Harness output artifacts — generated per run, never committed
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local config that may carry ADO tokens
+config.json
+config.local.json

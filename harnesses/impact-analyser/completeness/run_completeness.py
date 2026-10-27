@@ -11,36 +11,26 @@ Three checks per run:
                       test case for each one?
 
 Usage:
-  python3 harnesses/completeness/run.py
-  python3 harnesses/completeness/run.py --config harnesses/completeness/config.json
-  python3 harnesses/completeness/run.py --iterations 3
+  python3 testing/completeness-harness/run_completeness.py
+  python3 testing/completeness-harness/run_completeness.py --config path/to/config.json
+  python3 testing/completeness-harness/run_completeness.py --iterations 3
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import dataclasses
 import datetime
 import json
 import logging
 import os
-import sys
 import time
 import uuid
-from typing import Any
+from typing import Any  # noqa: F401 — used by AnalyserClient type hints
 
-# ---------------------------------------------------------------------------
-# Ensure repo root is on sys.path so `from shared.X import Y` works when this
-# script is run as  python3 harnesses/completeness/run.py  from any cwd.
-# ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-
-from shared.client import SolutionClient  # noqa: E402
-from shared.dotenv import load_dotenv     # noqa: E402
+import httpx
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,32 +58,116 @@ def rgb(hex6: str):
 
 
 # ---------------------------------------------------------------------------
+# .env loader (harness runs outside Docker)
+# ---------------------------------------------------------------------------
+
+def _load_dotenv(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            os.environ.setdefault(key, val)
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
 def load_config(path: str, iterations_override: int | None = None) -> dict:
-    load_dotenv()
+    _load_dotenv()
     with open(path) as fh:
         cfg = json.load(fh)
     if iterations_override is not None:
         cfg["runner"]["iterations"] = iterations_override
-    sel = cfg.setdefault("selector", {})
-    sel["integration_url"] = os.getenv("ADO_BASE_URL", sel.get("integration_url", ""))
-    sel["integration_project"] = os.getenv("ADO_PROJECT_KEY", sel.get("integration_project", ""))
-    sel["integration_token"] = os.getenv("ADO_TOKEN", sel.get("integration_token", ""))
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# HTTP client
+# ---------------------------------------------------------------------------
+
+class AnalyserClient:
+    def __init__(self, agent_base_url: str, integration_base_url: str, tenant_id: str) -> None:
+        self._agent = agent_base_url.rstrip("/")
+        self._integration = integration_base_url.rstrip("/")
+        self._tenant = tenant_id
+        self._http: httpx.AsyncClient = None  # type: ignore
+
+    async def __aenter__(self) -> "AnalyserClient":
+        self._http = httpx.AsyncClient(timeout=60.0)
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self._http.aclose()
+
+    async def health(self) -> dict:
+        r = await self._http.get(f"{self._agent}/health")
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_cr(self, cr_id: str, sel: dict) -> dict:
+        r = await self._http.get(
+            f"{self._integration}/cr/{sel['source']}/{cr_id}",
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_test_cases(self, sel: dict) -> list[dict]:
+        params = {"tags": sel.get("test_case_tags", [])}
+        r = await self._http.get(
+            f"{self._integration}/test-cases/{sel['source']}",
+            params=params,
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json().get("items", [])
+
+    async def submit_cr(
+        self,
+        cr_id: str,
+        normalised_cr: dict,
+        existing_tests: list,
+        tcg_enabled: bool,
+    ) -> dict:
+        body = {
+            "tenant_id": self._tenant,
+            "cr_id": cr_id,
+            "normalised_cr": normalised_cr,
+            "existing_tests": existing_tests,
+            "tcg_enabled": tcg_enabled,
+            "bypass_cache": True,
+        }
+        r = await self._http.post(f"{self._agent}/analyse/cr", json=body, timeout=60.0)
+        r.raise_for_status()
+        return r.json()
+
+    async def get_run(self, run_id: str) -> dict:
+        r = await self._http.get(
+            f"{self._agent}/analyse/cr/{run_id}",
+            params={"tenant_id": self._tenant},
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 # ---------------------------------------------------------------------------
 # Polling
 # ---------------------------------------------------------------------------
 
-async def _poll(client: SolutionClient, run_id: str, runner_cfg: dict) -> dict:
+async def poll(client: AnalyserClient, run_id: str, runner_cfg: dict) -> dict:
     deadline = time.monotonic() + runner_cfg.get("poll_timeout_sec", 1200.0)
     interval = runner_cfg.get("poll_interval_sec", 3.0)
     done = {"complete", "cache_hit"}
     while True:
-        row = await client.poll(run_id)
+        row = await client.get_run(run_id)
         status = row.get("status", "unknown")
         if status in done:
             report = row.get("report")
@@ -153,17 +227,12 @@ def _matches(test_name: str, expected: str) -> bool:
     return expected.lower() in test_name.lower() or test_name.lower() in expected.lower()
 
 
-def check_recall(
-    scored_tests: list[dict], must_flag: list[str], schema: dict
-) -> tuple[list[str], list[str]]:
+def check_recall(scored_tests: list[dict], must_flag: list[str]) -> tuple[list[str], list[str]]:
     """Return (found, missing) against the must_flag gold standard."""
-    action_field = schema.get("action_field", "recommended_action")
-    name_field = schema.get("test_name_field", "test_name")
-
     flagged = [
-        (t.get(name_field) or "").strip()
+        (t.get("test_name") or "").strip()
         for t in scored_tests
-        if (t.get(action_field) or "").lower() in {"must run", "should run"}
+        if (t.get("recommended_action") or "").lower() in {"must run", "should run"}
     ]
     found, missing = [], []
     for expected in must_flag:
@@ -175,17 +244,12 @@ def check_recall(
     return found, missing
 
 
-def check_false_exclusions(
-    scored_tests: list[dict], must_not_exclude: list[str], schema: dict
-) -> list[str]:
+def check_false_exclusions(scored_tests: list[dict], must_not_exclude: list[str]) -> list[str]:
     """Return list of must_not_exclude tests that were actually marked Exclude."""
-    action_field = schema.get("action_field", "recommended_action")
-    name_field = schema.get("test_name_field", "test_name")
-
     excluded = [
-        (t.get(name_field) or "").strip()
+        (t.get("test_name") or "").strip()
         for t in scored_tests
-        if (t.get(action_field) or "").lower() == "exclude"
+        if (t.get("recommended_action") or "").lower() == "exclude"
     ]
     violations = []
     for critical in must_not_exclude:
@@ -212,7 +276,7 @@ class RunOutcome:
     gaps_found: list[str]
     gaps_missing: list[str]
     gaps_with_tc: int            # gaps that have a generated TC covering them
-    total_gaps: int              # total gaps found by solution
+    total_gaps: int              # total gaps found by analyser
     tc_count: int
     overall_risk: str | None
     elapsed_sec: float
@@ -225,7 +289,7 @@ class RunOutcome:
 # ---------------------------------------------------------------------------
 
 async def run_once(
-    client: SolutionClient,
+    client: AnalyserClient,
     index: int,
     normalised_cr: dict,
     existing_tests: list,
@@ -233,14 +297,6 @@ async def run_once(
     cfg: dict,
 ) -> RunOutcome:
     runner_cfg = cfg["runner"]
-    schema = cfg.get("response_schema", {})
-
-    summary_key = schema.get("summary_key", "summary")
-    risk_field = schema.get("risk_field", "overall_risk")
-    scored_key = schema.get("scored_tests_key", "scored_tests")
-    coverage_gaps_key = schema.get("coverage_gaps_key", "coverage_gaps")
-    gen_tcs_key = schema.get("generated_tcs_key", "generated_test_cases")
-
     cr_id = cr_cfg["cr_id"]
     gold = cr_cfg["gold_standard"]
     thresholds = cfg.get("thresholds", {})
@@ -252,7 +308,7 @@ async def run_once(
     started = time.monotonic()
 
     try:
-        submit = await client.submit(
+        submit = await client.submit_cr(
             cr_id=cr_id_used,
             normalised_cr=normalised_cr,
             existing_tests=existing_tests,
@@ -267,17 +323,17 @@ async def run_once(
             if not run_id:
                 raise RuntimeError(f"no run_id in submit response: {submit!r}")
             logger.info("run %d submitted — run_id=%s", index + 1, run_id)
-            report = await _poll(client, run_id, runner_cfg)
+            report = await poll(client, run_id, runner_cfg)
 
-        scored = report.get(scored_key) or []
-        coverage_gaps = report.get(coverage_gaps_key) or []
-        generated_tcs = report.get(gen_tcs_key) or []
-        summary = report.get(summary_key) or {}
-        overall_risk = summary.get(risk_field)
+        scored = report.get("scored_tests") or []
+        coverage_gaps = report.get("coverage_gaps") or []
+        generated_tcs = report.get("generated_test_cases") or []
+        summary = report.get("summary") or {}
+        overall_risk = summary.get("overall_risk")
 
         # Test recall
-        found, missing = check_recall(scored, gold["must_flag"], schema)
-        false_excl = check_false_exclusions(scored, gold["must_not_exclude"], schema)
+        found, missing = check_recall(scored, gold["must_flag"])
+        false_excl = check_false_exclusions(scored, gold["must_not_exclude"])
         recall_score = len(found) / len(gold["must_flag"]) if gold["must_flag"] else 1.0
 
         # Coverage gap recall
@@ -303,11 +359,11 @@ async def run_once(
             gaps_with_tc, total_gaps, overall_risk, elapsed,
         )
         for m in missing:
-            logger.warning("  ! Missing from Must/Should Run: %s", m)
+            logger.warning("  ⚠ Missing from Must/Should Run: %s", m)
         for v in false_excl:
-            logger.warning("  ! Critical test Excluded: %s", v)
+            logger.warning("  ⚠ Critical test Excluded: %s", v)
         for g in gaps_missing:
-            logger.warning("  ! Coverage gap not identified: %s", g)
+            logger.warning("  ⚠ Coverage gap not identified: %s", g)
 
         return RunOutcome(
             index=index,
@@ -525,13 +581,12 @@ def _cell_text(cell: Any, text: str, bold: bool = False, colour: str | None = No
 
 
 def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
-    try:
-        from docx import Document  # type: ignore
-        from docx.shared import Pt, Cm  # type: ignore
-        from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
-    except ImportError:
-        logger.warning("python-docx not installed — skipping Word report. Run: pip3 install python-docx")
-        return
+    from docx import Document  # type: ignore
+    from docx.shared import Pt, Cm, RGBColor  # type: ignore
+    from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
+    import copy
+    from docx.oxml import OxmlElement  # type: ignore
+    from docx.oxml.ns import qn  # type: ignore
 
     doc = Document()
 
@@ -547,10 +602,10 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
     total_runs = sum(len(r["outcomes"]) for r in cr_results)
     total_passed = sum(sum(1 for o in r["outcomes"] if o.passed) for r in cr_results)
 
-    # Title
+    # ── Title ──────────────────────────────────────────────────────────────
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title_p.add_run("AI SOLUTION TESTING HARNESS")
+    run = title_p.add_run("AI TEST IMPACT ANALYSER")
     run.bold = True
     run.font.size = Pt(18)
     run.font.color.rgb = rgb(BLUE)
@@ -563,7 +618,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
     doc.add_paragraph()
 
-    # Meta table
+    # ── Meta table ─────────────────────────────────────────────────────────
     meta = doc.add_table(rows=4, cols=2)
     _add_table_borders(meta)
     _set_col_widths(meta, [4.5, 11.5])
@@ -580,7 +635,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
     doc.add_paragraph()
 
-    # Per-CR sections
+    # ── Per-CR sections ────────────────────────────────────────────────────
     for r in cr_results:
         outcomes: list[RunOutcome] = r["outcomes"]
         cr_cfg = r["cr_cfg"]
@@ -623,7 +678,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
         doc.add_paragraph()
 
         # Run results table
-        headers = ["Run", "Status", "Test Recall", "Gap Recall", "Gap->TC", "Excl. Violations", "TCs gen.", "Time"]
+        headers = ["Run", "Status", "Test Recall", "Gap Recall", "Gap→TC", "Excl. Violations", "TCs gen.", "Time"]
         widths = [1.0, 1.3, 2.0, 2.0, 1.5, 2.5, 1.5, 1.5]
         tbl = doc.add_table(rows=1 + len(outcomes), cols=len(headers))
         _add_table_borders(tbl)
@@ -668,28 +723,28 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
             mc = Counter(all_missing_tests)
             note = doc.add_paragraph()
             note.add_run("Tests consistently missed: ").bold = True
-            note.add_run(", ".join(f"{t} ({c}x)" for t, c in mc.most_common()))
+            note.add_run(", ".join(f"{t} ({c}×)" for t, c in mc.most_common()))
         else:
             note = doc.add_paragraph()
-            note.add_run("All gold-standard tests flagged on every run.").font.color.rgb = rgb(GREEN)
+            note.add_run("All gold-standard tests flagged on every run. ✓").font.color.rgb = rgb(GREEN)
         if all_missing_gaps:
             mc = Counter(all_missing_gaps)
             note = doc.add_paragraph()
             note.add_run("Coverage gaps consistently missed: ").bold = True
-            note.add_run(", ".join(f"{g} ({c}x)" for g, c in mc.most_common()))
+            note.add_run(", ".join(f"{g} ({c}×)" for g, c in mc.most_common()))
         else:
             note = doc.add_paragraph()
-            note.add_run("All gold-standard coverage gaps identified on every run.").font.color.rgb = rgb(GREEN)
+            note.add_run("All gold-standard coverage gaps identified on every run. ✓").font.color.rgb = rgb(GREEN)
 
         doc.add_paragraph()
 
-    # Overall verdict
+    # ── Overall verdict ────────────────────────────────────────────────────
     verdict_p = doc.add_paragraph()
     verdict_colour = GREEN if overall >= 0.90 else AMBER if overall >= 0.80 else RED
     verdict_text = (
-        "All CRs passed. The solution correctly flagged all critical tests and generated valid test cases."
+        "All CRs passed. The analyser correctly flagged all critical tests and generated valid test cases."
         if total_passed == total_runs
-        else "One or more CRs missed critical tests or flagged false exclusions. Review violations above."
+        else f"One or more CRs missed critical tests or flagged false exclusions. Review violations above."
     )
     verdict_p.add_run(verdict_text).font.color.rgb = rgb(verdict_colour)
 
@@ -702,13 +757,8 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def main_async(cfg: dict) -> int:
-    endpoints = cfg.get("endpoints", {})
-    client = SolutionClient(
-        cfg["agent_base_url"],
-        cfg.get("integration_base_url", ""),
-        cfg["tenant_id"],
-        endpoints=endpoints,
-    )
+    # Health check
+    client = AnalyserClient(cfg["agent_base_url"], cfg["integration_base_url"], cfg["tenant_id"])
 
     async with client:
         try:
@@ -716,7 +766,7 @@ async def main_async(cfg: dict) -> int:
             logger.info("Agent service healthy")
         except Exception as exc:
             logger.error("Agent service health check failed: %s", exc)
-            logger.error("Is the stack running?")
+            logger.error("Is the stack running? Try: docker compose up -d")
             return 1
 
         sel = cfg.get("selector", {})
@@ -728,12 +778,7 @@ async def main_async(cfg: dict) -> int:
 
         # Fetch existing tests once
         logger.info("Fetching existing test cases (tags: %s)...", sel.get("test_case_tags"))
-        existing_tests = await client.fetch_test_cases_by_tags(
-            tags=sel.get("test_case_tags") or [],
-            url=sel.get("integration_url", ""),
-            project=sel.get("integration_project", ""),
-            token=sel.get("integration_token", ""),
-        )
+        existing_tests = await client.fetch_test_cases(sel)
         logger.info("Loaded %d existing tests", len(existing_tests))
 
         cr_results = []
@@ -746,15 +791,9 @@ async def main_async(cfg: dict) -> int:
             logger.info("=" * 50)
             logger.info("CR: %s (%s)", label, cr_id)
 
-            # Fetch CR from integration
-            logger.info("Fetching CR %s ...", cr_id)
-            cr_data = await client.fetch_cr(
-                tool=sel.get("source", "ado"),
-                cr_id=cr_id,
-                url=sel.get("integration_url", ""),
-                project=sel.get("integration_project", ""),
-                token=sel.get("integration_token", ""),
-            )
+            # Fetch CR from ADO
+            logger.info("Fetching CR %s from ADO...", cr_id)
+            cr_data = await client.fetch_cr(cr_id, sel)
             normalised_cr = cr_data.get("normalised_cr") or {}
             cr_title = normalised_cr.get("title", "(no title)")
             logger.info("Title: %s", cr_title)
@@ -797,8 +836,8 @@ async def main_async(cfg: dict) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Completeness harness for AI solution testing")
-    parser.add_argument("--config", default="harnesses/completeness/config.json")
+    parser = argparse.ArgumentParser(description="Completeness harness")
+    parser.add_argument("--config", default="testing/completeness-harness/config.json")
     parser.add_argument("--iterations", type=int, default=None)
     args = parser.parse_args()
     cfg = load_config(args.config, iterations_override=args.iterations)

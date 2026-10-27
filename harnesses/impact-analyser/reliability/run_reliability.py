@@ -1,10 +1,10 @@
-"""Reliability harness — asserts the AI solution recommends the right tests to catch a known defect.
+"""Reliability harness — asserts the AI recommends the right tests to catch a known defect.
 
 Design intent
 -------------
-For each defined defect scenario we submit the related CR to the solution N times and
+For each defined defect scenario we submit the related CR to the analyser N times and
 assert that the test(s) which would catch the defect are recommended as Must Run or
-Should Run.  If the solution misses them, a real defect could ship undetected.
+Should Run.  If the analyser misses them, a real defect could ship undetected.
 
 The defect itself is NOT injected automatically — each scenario documents what the defect
 is and which code file to change.  The harness validates that the AI would have caught it
@@ -12,9 +12,9 @@ by checking its recommendations against the CR, not by running the application.
 
 Usage (run from repo root)
 --------------------------
-    python3 harnesses/reliability/run.py
-    python3 harnesses/reliability/run.py --config harnesses/reliability/config.json
-    python3 harnesses/reliability/run.py --iterations 3
+    python3 testing/reliability-harness/run_reliability.py
+    python3 testing/reliability-harness/run_reliability.py --config testing/reliability-harness/config.json
+    python3 testing/reliability-harness/run_reliability.py --iterations 3
 """
 
 from __future__ import annotations
@@ -29,19 +29,9 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
-# ---------------------------------------------------------------------------
-# Ensure repo root is on sys.path so `from shared.X import Y` works when this
-# script is run as  python3 harnesses/reliability/run.py  from any cwd.
-# ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-
-from shared.client import SolutionClient  # noqa: E402
-from shared.dotenv import load_dotenv     # noqa: E402
+import httpx
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +49,7 @@ DEFAULT_CONFIG = {
     "agent_base_url": "http://localhost:8000",
     "integration_base_url": "http://localhost:3001",
     "tenant_id": "00000000-0000-0000-0000-000000000001",
-    "output_dir": "harnesses/reliability/runs",
+    "output_dir": "testing/reliability-harness/runs",
     "selector": {
         "source": "ado",
         "test_case_tags": ["Regression"],
@@ -74,17 +64,22 @@ DEFAULT_CONFIG = {
         "poll_interval_sec": 3.0,
         "poll_timeout_sec": 1200.0,
     },
-    # response_schema lets harness adapt to the solution's field names
-    "response_schema": {
-        "action_field": "recommended_action",
-        "risk_field": "overall_risk",
-        "summary_key": "summary",
-        "scored_tests_key": "scored_tests",
-        "test_name_field": "test_name",
-        "test_id_field": "test_id",
-    },
     "scenarios": [],
 }
+
+
+def _load_dotenv(path: str = ".env") -> dict[str, str]:
+    env: dict[str, str] = {}
+    if not os.path.exists(path):
+        return env
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
 
 
 def _deep_merge(base: dict, override: dict) -> None:
@@ -101,7 +96,8 @@ def load_config(path: Optional[str], iterations_override: Optional[int]) -> dict
         with open(path, encoding="utf-8") as fh:
             _deep_merge(cfg, json.load(fh))
 
-    load_dotenv()
+    for k, v in _load_dotenv().items():
+        os.environ.setdefault(k, v)
 
     sel = cfg["selector"]
     sel["integration_url"] = os.getenv("ADO_BASE_URL", sel.get("integration_url", ""))
@@ -115,15 +111,87 @@ def load_config(path: Optional[str], iterations_override: Optional[int]) -> dict
 
 
 # ---------------------------------------------------------------------------
+# HTTP client (same pattern as integrity harness)
+# ---------------------------------------------------------------------------
+
+class AnalyserClient:
+    def __init__(self, agent_base_url: str, integration_base_url: str, tenant_id: str) -> None:
+        self._agent = agent_base_url.rstrip("/")
+        self._integration = integration_base_url.rstrip("/")
+        self._tenant_id = tenant_id
+        self._http = httpx.AsyncClient(timeout=60.0)
+
+    async def __aenter__(self) -> "AnalyserClient":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self._http.aclose()
+
+    async def health(self) -> dict:
+        r = await self._http.get(f"{self._agent}/health")
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_cr(self, cr_id: str, sel: dict) -> dict:
+        headers = {
+            "X-Integration-Url": sel["integration_url"],
+            "X-Integration-Project": sel["integration_project"],
+            "X-Integration-Token": sel["integration_token"],
+        }
+        r = await self._http.get(
+            f"{self._integration}/cr/{sel['source']}/{cr_id}",
+            headers=headers, timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_test_cases(self, sel: dict) -> list[dict]:
+        headers = {
+            "X-Integration-Url": sel["integration_url"],
+            "X-Integration-Project": sel["integration_project"],
+            "X-Integration-Token": sel["integration_token"],
+        }
+        tags = sel.get("test_case_tags") or []
+        r = await self._http.get(
+            f"{self._integration}/test-cases/ado",
+            params={"tags": ",".join(tags)},
+            headers=headers, timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json().get("items", [])
+
+    async def submit_cr(self, cr_id: str, normalised_cr: dict, existing_tests: list, tcg_enabled: bool) -> dict:
+        body: dict[str, Any] = {
+            "tenant_id": self._tenant_id,
+            "cr_id": cr_id,
+            "normalised_cr": normalised_cr,
+            "analysis_mode": "full",
+            "tcg_enabled": tcg_enabled,
+            "existing_tests": existing_tests,
+        }
+        r = await self._http.post(f"{self._agent}/analyse/cr", json=body, timeout=60.0)
+        r.raise_for_status()
+        return r.json()
+
+    async def get_run(self, run_id: str) -> dict:
+        r = await self._http.get(
+            f"{self._agent}/analyse/cr/{run_id}",
+            params={"tenant_id": self._tenant_id},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+# ---------------------------------------------------------------------------
 # Polling
 # ---------------------------------------------------------------------------
 
-async def _poll(client: SolutionClient, run_id: str, runner_cfg: dict) -> dict:
+async def poll(client: AnalyserClient, run_id: str, runner_cfg: dict) -> dict:
     deadline = time.monotonic() + runner_cfg.get("poll_timeout_sec", 1200.0)
     interval = runner_cfg.get("poll_interval_sec", 3.0)
     done = {"complete", "cache_hit"}
     while True:
-        row = await client.poll(run_id)
+        row = await client.get_run(run_id)
         status = row.get("status", "unknown")
         if status in done:
             report = row.get("report")
@@ -155,23 +223,16 @@ class RunOutcome:
     error: Optional[str] = None
 
 
-def check_reliability(
-    report: dict, expected_must_run: list[str], schema: dict
-) -> tuple[list[str], list[str], list[str]]:
+def check_reliability(report: dict, expected_must_run: list[str]) -> tuple[list[str], list[str], list[str]]:
     """
     Returns (violations, found_tests, missing_tests).
     A test passes if it appears in scored_tests with Must Run or Should Run.
     """
-    scored_key = schema.get("scored_tests_key", "scored_tests")
-    action_field = schema.get("action_field", "recommended_action")
-    name_field = schema.get("test_name_field", "test_name")
-    id_field = schema.get("test_id_field", "test_id")
-
-    scored = report.get(scored_key) or []
+    scored = report.get("scored_tests") or []
     flagged = {
-        (t.get(name_field) or t.get(id_field) or "").strip()
+        (t.get("test_name") or t.get("test_id") or "").strip()
         for t in scored
-        if (t.get(action_field) or "").lower() in {"must run", "should run"}
+        if (t.get("recommended_action") or "").lower() in {"must run", "should run"}
     }
 
     found, missing, violations = [], [], []
@@ -191,7 +252,7 @@ def check_reliability(
 
 
 async def run_once(
-    client: SolutionClient,
+    client: AnalyserClient,
     index: int,
     normalised_cr: dict,
     existing_tests: list,
@@ -199,10 +260,6 @@ async def run_once(
     cfg: dict,
 ) -> RunOutcome:
     runner_cfg = cfg["runner"]
-    schema = cfg.get("response_schema", {})
-    summary_key = schema.get("summary_key", "summary")
-    risk_field = schema.get("risk_field", "overall_risk")
-
     cr_id = scenario["cr_id"]
     expected = scenario["expected_must_run"]
     bypass = runner_cfg.get("bypass_cache", True)
@@ -210,7 +267,7 @@ async def run_once(
     started = time.monotonic()
 
     try:
-        submit = await client.submit(
+        submit = await client.submit_cr(
             cr_id=cr_id_used,
             normalised_cr=normalised_cr,
             existing_tests=existing_tests,
@@ -225,10 +282,10 @@ async def run_once(
             if not run_id:
                 raise RuntimeError(f"no run_id in submit response: {submit!r}")
             logger.info("run %d submitted — run_id=%s", index + 1, run_id)
-            report = await _poll(client, run_id, runner_cfg)
+            report = await poll(client, run_id, runner_cfg)
 
-        violations, found, missing = check_reliability(report, expected, schema)
-        summary = report.get(summary_key) or {}
+        violations, found, missing = check_reliability(report, expected)
+        summary = report.get("summary") or {}
 
         return RunOutcome(
             index=index,
@@ -236,7 +293,7 @@ async def run_once(
             cr_id_used=cr_id_used,
             passed=len(violations) == 0,
             violations=violations,
-            overall_risk=summary.get(risk_field),
+            overall_risk=summary.get("overall_risk"),
             found_tests=found,
             missing_tests=missing,
             elapsed_sec=round(time.monotonic() - started, 2),
@@ -273,7 +330,7 @@ def render_scenario_section(scenario: dict, outcomes: list[RunOutcome]) -> list[
     lines = []
     lines.append(f"  {scenario['label']}")
     lines.append(f"  CR: {scenario['cr_id']}   Expected Must Run: {scenario['expected_must_run']}")
-    lines.append(f"  Defect: {scenario.get('defect', 'N/A')}")
+    lines.append(f"  Defect: {scenario['defect']}")
     lines.append(f"  {'─' * 56}")
     lines.append(f"  Reliability score: {score:.3f}  [{_band(score)}]   ({len(passed)}/{total} passed)")
     lines.append("")
@@ -291,7 +348,7 @@ def render_scenario_section(scenario: dict, outcomes: list[RunOutcome]) -> list[
         for o in bad:
             lines.append(f"  Run {o.index + 1}:")
             for v in o.violations:
-                lines.append(f"    - {v}")
+                lines.append(f"    • {v}")
 
     return lines
 
@@ -331,7 +388,7 @@ def render_json(scenario_results: list[dict], cfg: dict) -> dict:
             {
                 "label": r["scenario"]["label"],
                 "cr_id": r["scenario"]["cr_id"],
-                "defect": r["scenario"].get("defect", ""),
+                "defect": r["scenario"]["defect"],
                 "expected_must_run": r["scenario"]["expected_must_run"],
                 "iterations": len(r["outcomes"]),
                 "passed": sum(1 for o in r["outcomes"] if o.passed),
@@ -432,7 +489,7 @@ def render_docx(scenario_results: list[dict], cfg: dict, out_path: str) -> None:
 
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    add_run(sub, "AI Solution Testing Harness — Defect Detection Validation", color=BLUE, size=11)
+    add_run(sub, "AI Test Impact Analyser — Defect Detection Validation", color=BLUE, size=11)
 
     doc.add_paragraph()
 
@@ -475,7 +532,7 @@ def render_docx(scenario_results: list[dict], cfg: dict, out_path: str) -> None:
         detail = doc.add_table(rows=3, cols=2)
         for row2, (label, value) in zip(detail.rows, [
             ("CR",              scenario["cr_id"]),
-            ("Defect",          scenario.get("defect", "")),
+            ("Defect",          scenario["defect"]),
             ("Expected Must Run", ", ".join(scenario["expected_must_run"])),
         ]):
             shade_cell(row2.cells[0], LGREY)
@@ -540,10 +597,10 @@ def render_docx(scenario_results: list[dict], cfg: dict, out_path: str) -> None:
 
     if overall == 1.0:
         note = doc.add_paragraph()
-        note.add_run("All scenarios passed. The solution correctly identified the Must Run tests on every run.").font.color.rgb = rgb(GREEN)
+        note.add_run("All scenarios passed. The analyser correctly identified the Must Run tests on every run.").font.color.rgb = rgb(GREEN)
     else:
         note = doc.add_paragraph()
-        note.add_run("One or more scenarios failed. The solution missed expected Must Run tests — review violations above.").font.color.rgb = rgb(RED)
+        note.add_run("One or more scenarios failed. The analyser missed expected Must Run tests — review violations above.").font.color.rgb = rgb(RED)
 
     doc.save(out_path)
     logger.info("Word report written to %s", out_path)
@@ -558,7 +615,6 @@ async def main_async(cfg: dict) -> int:
     runner_cfg = cfg["runner"]
     iterations = runner_cfg["iterations"]
     scenarios = cfg["scenarios"]
-    endpoints = cfg.get("endpoints", {})
 
     if not scenarios:
         logger.error("No scenarios defined in config. Add scenarios to config.json.")
@@ -566,27 +622,21 @@ async def main_async(cfg: dict) -> int:
 
     scenario_results: list[dict] = []
 
-    async with SolutionClient(
+    async with AnalyserClient(
         cfg["agent_base_url"],
         cfg["integration_base_url"],
         cfg["tenant_id"],
-        endpoints=endpoints,
     ) as client:
         try:
             await client.health()
         except Exception as exc:
             logger.error("Agent service health check failed: %s", exc)
-            logger.error("Is the stack running?")
+            logger.error("Is the stack running? Try: docker compose up -d")
             return 1
 
         # Fetch shared test cases once
         logger.info("Fetching existing test cases (tags: %s)...", sel.get("test_case_tags"))
-        existing_tests = await client.fetch_test_cases_by_tags(
-            tags=sel.get("test_case_tags") or [],
-            url=sel.get("integration_url", ""),
-            project=sel.get("integration_project", ""),
-            token=sel.get("integration_token", ""),
-        )
+        existing_tests = await client.fetch_test_cases(sel)
         logger.info("Loaded %d existing tests", len(existing_tests))
 
         for scenario in scenarios:
@@ -597,19 +647,13 @@ async def main_async(cfg: dict) -> int:
             logger.info("=" * 50)
             logger.info("Scenario: %s", label)
 
-            # Use inline normalised_cr if defined — no integration fetch needed
+            # Use inline normalised_cr if defined — no ADO fetch needed
             if "normalised_cr" in scenario:
                 normalised_cr = scenario["normalised_cr"]
-                logger.info("Using inline CR definition (no integration fetch)")
+                logger.info("Using inline CR definition (no ADO fetch)")
             else:
-                logger.info("Fetching CR %s ...", cr_id)
-                cr_data = await client.fetch_cr(
-                    tool=sel.get("source", "ado"),
-                    cr_id=cr_id,
-                    url=sel.get("integration_url", ""),
-                    project=sel.get("integration_project", ""),
-                    token=sel.get("integration_token", ""),
-                )
+                logger.info("Fetching CR %s from ADO...", cr_id)
+                cr_data = await client.fetch_cr(cr_id, sel)
                 normalised_cr = cr_data.get("normalised_cr") or {}
 
             cr_title = normalised_cr.get("title", "(no title)")
@@ -631,7 +675,7 @@ async def main_async(cfg: dict) -> int:
                 )
                 if outcome.violations:
                     for v in outcome.violations:
-                        logger.warning("  ! %s", v)
+                        logger.warning("  ⚠ %s", v)
                 outcomes.append(outcome)
 
             scenario_results.append({"scenario": scenario, "outcomes": outcomes})
@@ -668,8 +712,8 @@ async def main_async(cfg: dict) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reliability harness for AI solution testing")
-    parser.add_argument("--config", default="harnesses/reliability/config.json")
+    parser = argparse.ArgumentParser(description="Reliability harness for the AI test impact analyser")
+    parser.add_argument("--config", default="testing/reliability-harness/config.json")
     parser.add_argument("--iterations", type=int, default=None)
     args = parser.parse_args()
     cfg = load_config(args.config, args.iterations)

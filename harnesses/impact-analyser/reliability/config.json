@@ -1,0 +1,61 @@
+{
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "testing/reliability-harness/runs",
+
+  "selector": {
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "https://dev.azure.com/qea",
+    "integration_project": "Defra QA Assurance",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 1200.0
+  },
+
+  "scenarios": [
+    {
+      "label": "Scenario 1 — NI number dropped from submission",
+      "cr_id": "RELIABILITY-001",
+      "defect": "Remove the NI number field value from the form context before submission — field renders on screen but is not included in submitted data.",
+      "normalised_cr": {
+        "title": "Add National Insurance Number field to personal details form",
+        "description": "A new National Insurance Number input field has been added to the Step 2 Personal Details page of the benefits application form. The field is required and must be captured and included in the submitted application data. The field appears between the date of birth and the Continue button.",
+        "acceptance_criteria": "The National Insurance Number field is displayed on the Personal Details step. The field value is validated — it must not be blank. The submitted application data includes the National Insurance Number. The confirmation page displays the National Insurance Number entered by the user.",
+        "labels": ["UI", "Form", "Personal Details", "Step 2"]
+      },
+      "expected_must_run": ["TC-002: Happy Path Application Submission", "TC-010: Confirmation Page Summary Details"]
+    },
+    {
+      "label": "Scenario 2 — Postcode validation regex broken",
+      "cr_id": "RELIABILITY-002",
+      "defect": "Corrupt the postcode validation regex so any string passes — invalid postcodes like 'AAAAA' are accepted without error.",
+      "normalised_cr": {
+        "title": "Fix postcode validation logic on contact information step",
+        "description": "The postcode input field on the Step 3 Contact Information page has had its validation regex updated. The regex now accepts a broader range of postcode formats including edge cases. This change affects the client-side validation logic in the contact form component.",
+        "acceptance_criteria": "The postcode field accepts valid UK postcodes in all standard formats (e.g. SW1A 1AA, EC1A 1BB). The postcode field rejects invalid strings that do not match UK postcode format. An appropriate error message is shown when an invalid postcode is entered. The error clears when a valid postcode is entered.",
+        "labels": ["UI", "Validation", "Contact Information", "Step 3", "Postcode"]
+      },
+      "expected_must_run": ["TC-005: Validation - Step 2: Contact Information"]
+    },
+    {
+      "label": "Scenario 3 — Date of birth future-date check removed",
+      "cr_id": "RELIABILITY-003",
+      "defect": "Remove the 'date must be in the past' validation rule so future dates of birth are accepted without error.",
+      "normalised_cr": {
+        "title": "Update date of birth validation rules on personal details step",
+        "description": "The date of birth field validation on the Step 2 Personal Details page has been modified. The validation logic that checks whether the entered date is in the past has been changed. This affects the date validation rules applied when the user clicks Continue on the personal details step.",
+        "acceptance_criteria": "The date of birth field accepts valid past dates. The date of birth field rejects future dates with an appropriate error message. The date of birth field rejects invalid dates such as 31 February. The error clears when a valid date is entered. The user cannot proceed to the next step with an invalid or future date of birth.",
+        "labels": ["UI", "Validation", "Personal Details", "Step 2", "Date of Birth"]
+      },
+      "expected_must_run": ["TC-004: Validation - Step 1: Personal Details"]
+    }
+  ]
+}

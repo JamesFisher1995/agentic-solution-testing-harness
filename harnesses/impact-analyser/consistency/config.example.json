@@ -1,0 +1,52 @@
+{
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "consistency-harness/runs",
+
+  "selector": {
+    "mode": "inline",
+    "cr_file": "consistency-harness/examples/sample_cr.json",
+
+    "_ado_mode_help": "set mode='ado' and fill the fields below to fetch live from ADO instead",
+    "cr_id": null,
+    "source": "ado",
+    "test_case_tags": [],
+    "integration_url": null,
+    "integration_project": null,
+    "integration_token": null
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "max_concurrency": 1,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 600.0,
+    "delete_runs_after": false
+  },
+
+  "evaluator": {
+    "weights": {
+      "test_set_stability": 0.30,
+      "action_agreement": 0.25,
+      "score_stability": 0.15,
+      "ranking_stability": 0.10,
+      "risk_agreement": 0.10,
+      "summary_stability": 0.05,
+      "coverage_gap_stability": 0.03,
+      "generated_test_case_consistency": 0.02
+    },
+    "score_stdev_full_penalty": 0.25
+  },
+
+  "_batch_mode_help": "Add a 'batch' array to run multiple CRs in one go. Each entry inherits from 'selector' and only needs to specify what differs. runner/evaluator config is shared across all CRs.",
+  "_batch_example": {
+    "batch": [
+      { "cr_id": "152", "test_case_tags": ["Regression", "Step 1", "Personal Details"] },
+      { "cr_id": "153", "test_case_tags": ["Regression", "Step 2"] },
+      { "cr_id": "154", "test_case_tags": ["Payments"] }
+    ]
+  }
+}

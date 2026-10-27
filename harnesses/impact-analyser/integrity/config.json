@@ -1,0 +1,59 @@
+{
+  "agent_base_url": "http://localhost:8000",
+  "integration_base_url": "http://localhost:3001",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "output_dir": "testing/integrity-harness/runs",
+  "_output_dir_note": "path is relative to wherever you run the CLI from — run from repo root",
+
+  "selector": {
+    "mode": "ado",
+    "source": "ado",
+    "test_case_tags": ["Regression"],
+    "integration_url": "https://dev.azure.com/qea",
+    "integration_project": "Defra QA Assurance",
+    "integration_token": ""
+  },
+
+  "runner": {
+    "iterations": 5,
+    "tcg_enabled": true,
+    "bypass_cache": true,
+    "max_concurrency": 1,
+    "poll_interval_sec": 3.0,
+    "poll_timeout_sec": 1200.0,
+    "delete_runs_after": false
+  },
+
+  "crs": [
+    {
+      "cr_id": "158",
+      "_label": "CR-011: Correct Hint Text Wording on Step 2 Postcode Field — low-risk copy change",
+      "thresholds": {
+        "allowed_overall_risk": ["Low"],
+        "forbidden_actions": ["Must Run", "Should Run"],
+        "max_generated_test_cases": 1,
+        "_note": "A low-impact copy change should never produce High/Critical risk, Must/Should Run actions, or more than 1 generated test case"
+      }
+    },
+    {
+      "cr_id": "160",
+      "_label": "CR-013: Documentation Update — documentation-only change, no functional impact",
+      "thresholds": {
+        "allowed_overall_risk": ["Low"],
+        "forbidden_actions": ["Must Run", "Should Run"],
+        "max_generated_test_cases": 0,
+        "_note": "A documentation-only CR should produce Low risk and zero generated test cases"
+      }
+    },
+    {
+      "cr_id": "159",
+      "_label": "CR-012: Migrate to Updated GOV.UK Design System Global Header, Footer and Base Typography — cross-cutting High/Major change affecting every page",
+      "thresholds": {
+        "allowed_overall_risk": ["High", "Critical"],
+        "forbidden_actions": ["Exclude"],
+        "max_generated_test_cases": 5,
+        "_note": "CR-012 is a cross-cutting High/Major change — must consistently return High or Critical risk, must not Exclude any tests, and may generate up to 5 new test cases"
+      }
+    }
+  ]
+}

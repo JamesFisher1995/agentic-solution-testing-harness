@@ -26,12 +26,12 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .. import metrics
-from ..config import EvaluatorConfig, ResponseSchema
+from ..config import EvaluatorConfig
 from .base import Agent
 from .runner import RunResult
 
-_DEFAULT_COUNT_FIELDS = ("must_run", "should_run", "consider", "exclude",
-                         "coverage_gaps", "new_test_cases")
+_COUNT_FIELDS = ("must_run", "should_run", "consider", "exclude",
+                 "coverage_gaps", "new_test_cases")
 
 _BANDS = ((0.90, "Excellent"), (0.75, "Good"), (0.50, "Fair"), (0.0, "Poor"))
 
@@ -67,7 +67,7 @@ class ConsistencyReport:
 class EvaluatorAgent(Agent):
     name = "evaluator"
 
-    def run(self, results: list[RunResult], cfg: EvaluatorConfig, schema: ResponseSchema | None = None) -> ConsistencyReport:
+    def run(self, results: list[RunResult], cfg: EvaluatorConfig) -> ConsistencyReport:
         ok = [r for r in results if r.ok]
         reports = [r.report for r in ok]
         failed = len(results) - len(ok)
@@ -93,8 +93,7 @@ class EvaluatorAgent(Agent):
                 notes=notes,
             )
 
-        schema = schema or ResponseSchema()
-        dims, details = self._dimensions(reports, cfg, notes, schema)
+        dims, details = self._dimensions(reports, cfg, notes)
         score, weights_used = self._blend(dims, cfg.weights)
 
         return ConsistencyReport(
@@ -112,9 +111,9 @@ class EvaluatorAgent(Agent):
 
     # ------------------------------------------------------------------
     def _dimensions(
-        self, reports: list[dict], cfg: EvaluatorConfig, notes: list[str], schema: ResponseSchema
+        self, reports: list[dict], cfg: EvaluatorConfig, notes: list[str]
     ) -> tuple[dict[str, Optional[float]], dict[str, Any]]:
-        scored = [_scored_map(r, schema) for r in reports]
+        scored = [_scored_map(r) for r in reports]      # [{test_id: {...}}]
         id_sets = [set(m.keys()) for m in scored]
         union = set().union(*id_sets) if id_sets else set()
         common = set(id_sets[0]).intersection(*id_sets[1:]) if id_sets else set()
@@ -166,16 +165,15 @@ class EvaluatorAgent(Agent):
                 )
 
         # 5. overall_risk agreement
-        risks = [(_summary(r, schema).get(schema.risk_field)) for r in reports]
+        risks = [(_summary(r).get("overall_risk")) for r in reports]
         dims["risk_agreement"] = metrics.categorical_agreement(risks)
         details["overall_risk_values"] = risks
 
         # 6. summary count stability
-        count_fields = list(schema.count_fields.values()) if schema.count_fields else list(_DEFAULT_COUNT_FIELDS)
         cvs = []
         per_field_cv = {}
-        for f in count_fields:
-            series = [float(_summary(r, schema).get(f, 0) or 0) for r in reports]
+        for f in _COUNT_FIELDS:
+            series = [float(_summary(r).get(f, 0) or 0) for r in reports]
             cv = metrics.coefficient_of_variation(series)
             per_field_cv[f] = round(cv, 4)
             cvs.append(cv)
@@ -183,7 +181,7 @@ class EvaluatorAgent(Agent):
         details["summary_cv"] = per_field_cv
 
         # 7. coverage-gap stability
-        gap_sets = [_gap_components(r, schema) for r in reports]
+        gap_sets = [_gap_components(r) for r in reports]
         dims["coverage_gap_stability"] = metrics.mean_pairwise_jaccard(gap_sets)
 
         # 8. entity stability — does the story parser extract the same entities every run?
@@ -237,24 +235,25 @@ class EvaluatorAgent(Agent):
 # extraction helpers — tolerant of missing keys
 # ---------------------------------------------------------------------------
 
-def _summary(report: dict, schema: ResponseSchema) -> dict:
-    return report.get(schema.summary_field) or {}
+def _summary(report: dict) -> dict:
+    return report.get("summary") or {}
 
 
 def _classification(report: dict) -> dict:
     return report.get("classification") or {}
 
 
-def _scored_map(report: dict, schema: ResponseSchema) -> dict[str, dict]:
-    """Map test_id → {score, action} using the configured field names."""
+def _scored_map(report: dict) -> dict[str, dict]:
+    """{test_id: {composite_score, recommended_action}} keyed by test_id."""
     out: dict[str, dict] = {}
-    for t in report.get(schema.tests_field) or []:
-        tid = str(t.get(schema.test_id_field) or "").strip()
+    for t in report.get("scored_tests") or []:
+        tid = str(t.get("test_id") or "").strip()
         if not tid:
             continue
         out[tid] = {
-            "composite_score": float(t.get(schema.score_field) or 0.0),
-            "recommended_action": t.get(schema.action_field) or "",
+            "composite_score": float(t.get("composite_score") or 0.0),
+            "recommended_action": t.get("recommended_action") or "",
+            "risk_level": t.get("risk_level") or "",
         }
     return out
 
@@ -275,11 +274,11 @@ def _entities(report: dict) -> set[str]:
     }
 
 
-def _gap_components(report: dict, schema: ResponseSchema) -> set[str]:
+def _gap_components(report: dict) -> set[str]:
     return {
-        str(g.get(schema.gap_component_field) or "").strip()
-        for g in (report.get(schema.gaps_field) or [])
-        if (g.get(schema.gap_component_field) or "").strip()
+        str(g.get("component") or "").strip()
+        for g in (report.get("coverage_gaps") or [])
+        if (g.get("component") or "").strip()
     }
 
 

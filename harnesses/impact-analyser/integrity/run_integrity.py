@@ -1,20 +1,21 @@
-"""Integrity harness — asserts the AI solution does NOT hallucinate impact for
+"""Integrity harness — asserts the AI analyser does NOT hallucinate impact for
 low-impact change requests.
 
 Design intent
 -------------
-A CR that is genuinely low-impact should produce:
-  • overall_risk = Low (or whichever values config allows)
-  • no forbidden recommended_action values (e.g. Must Run / Should Run)
+A CR that is genuinely low-impact (e.g. a copy-only hint-text fix) should produce:
+  • overall_risk = Low
+  • no Must Run or Should Run recommendations
   • zero (or near-zero) generated test cases
 
-If the solution repeatedly assigns High/Critical risk or flags Must Run tests for
+If the analyser repeatedly assigns High/Critical risk or flags Must Run tests for
 such a CR, that is a hallucination of impact.  This harness quantifies that.
 
 Usage (run from repo root)
 --------------------------
-    python3 harnesses/integrity/run.py --config harnesses/integrity/config.json
-    python3 harnesses/integrity/run.py --iterations 10
+    python3 testing/integrity-harness/run_integrity.py
+    python3 testing/integrity-harness/run_integrity.py --config testing/integrity-harness/config.json
+    python3 testing/integrity-harness/run_integrity.py --iterations 10
 """
 
 from __future__ import annotations
@@ -29,19 +30,9 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
-# ---------------------------------------------------------------------------
-# Ensure repo root is on sys.path so `from shared.X import Y` works when this
-# script is run as  python3 harnesses/integrity/run.py  from any cwd.
-# ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-
-from shared.client import SolutionClient  # noqa: E402
-from shared.dotenv import load_dotenv     # noqa: E402
+import httpx
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -62,7 +53,7 @@ DEFAULT_CONFIG = {
     "agent_base_url": "http://localhost:8000",
     "integration_base_url": "http://localhost:3001",
     "tenant_id": "00000000-0000-0000-0000-000000000001",
-    "output_dir": "harnesses/integrity/runs",
+    "output_dir": "testing/integrity-harness/runs",
     "selector": {
         "mode": "ado",
         "cr_id": "158",
@@ -79,16 +70,6 @@ DEFAULT_CONFIG = {
         "poll_interval_sec": 3.0,
         "poll_timeout_sec": 1200.0,
     },
-    # response_schema lets harness adapt to the solution's field names
-    "response_schema": {
-        "action_field": "recommended_action",
-        "risk_field": "overall_risk",
-        "summary_key": "summary",
-        "scored_tests_key": "scored_tests",
-        "generated_tcs_key": "generated_test_cases",
-        "test_name_field": "test_name",
-        "test_id_field": "test_id",
-    },
     # Legacy single-CR format — used if "crs" array is absent
     "thresholds": {
         "allowed_overall_risk": ["Low"],
@@ -98,12 +79,19 @@ DEFAULT_CONFIG = {
 }
 
 
-def _deep_merge(base: dict, override: dict) -> None:
-    for k, v in override.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            _deep_merge(base[k], v)
-        else:
-            base[k] = v
+def _load_dotenv(dotenv_path: str = ".env") -> dict[str, str]:
+    """Parse a .env file into a dict without requiring python-dotenv."""
+    env: dict[str, str] = {}
+    if not os.path.exists(dotenv_path):
+        return env
+    with open(dotenv_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            env[key.strip()] = val.strip().strip('"').strip("'")
+    return env
 
 
 def load_config(path: Optional[str], iterations_override: Optional[int]) -> dict:
@@ -114,9 +102,11 @@ def load_config(path: Optional[str], iterations_override: Optional[int]) -> dict
         _deep_merge(cfg, file_cfg)
 
     # Load .env so LLM vars are available when running outside Docker
-    load_dotenv()
+    dot = _load_dotenv()
+    for key, val in dot.items():
+        os.environ.setdefault(key, val)
 
-    # env overrides for integration credentials
+    # env overrides for ADO credentials (same pattern as consistency-harness)
     sel = cfg["selector"]
     sel["integration_url"] = os.getenv("ADO_BASE_URL", sel.get("integration_url", ""))
     sel["integration_project"] = os.getenv("ADO_PROJECT_KEY", sel.get("integration_project", ""))
@@ -132,6 +122,88 @@ def load_config(path: Optional[str], iterations_override: Optional[int]) -> dict
         cfg["crs"] = [{"cr_id": cr_id, "thresholds": cfg["thresholds"]}]
 
     return cfg
+
+
+def _deep_merge(base: dict, override: dict) -> None:
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
+# ---------------------------------------------------------------------------
+# HTTP client (minimal — mirrors consistency-harness/harness/client.py)
+# ---------------------------------------------------------------------------
+
+class AnalyserClient:
+    def __init__(self, agent_base_url: str, integration_base_url: str, tenant_id: str) -> None:
+        self._agent = agent_base_url.rstrip("/")
+        self._integration = integration_base_url.rstrip("/")
+        self._tenant_id = tenant_id
+        self._http = httpx.AsyncClient(timeout=60.0)
+
+    async def __aenter__(self) -> "AnalyserClient":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self._http.aclose()
+
+    async def health(self) -> dict:
+        r = await self._http.get(f"{self._agent}/health")
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_cr(self, cr_id: str, sel: dict) -> dict:
+        headers = {
+            "X-Integration-Url": sel["integration_url"],
+            "X-Integration-Project": sel["integration_project"],
+            "X-Integration-Token": sel["integration_token"],
+        }
+        r = await self._http.get(
+            f"{self._integration}/cr/{sel['source']}/{cr_id}",
+            headers=headers,
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def fetch_test_cases(self, sel: dict) -> list[dict]:
+        headers = {
+            "X-Integration-Url": sel["integration_url"],
+            "X-Integration-Project": sel["integration_project"],
+            "X-Integration-Token": sel["integration_token"],
+        }
+        tags = sel.get("test_case_tags") or []
+        r = await self._http.get(
+            f"{self._integration}/test-cases/ado",
+            params={"tags": ",".join(tags)},
+            headers=headers,
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        return r.json().get("items", [])
+
+    async def submit_cr(self, cr_id: str, normalised_cr: dict, existing_tests: list, tcg_enabled: bool) -> dict:
+        body: dict[str, Any] = {
+            "tenant_id": self._tenant_id,
+            "cr_id": cr_id,
+            "normalised_cr": normalised_cr,
+            "analysis_mode": "full",
+            "tcg_enabled": tcg_enabled,
+            "existing_tests": existing_tests,
+        }
+        r = await self._http.post(f"{self._agent}/analyse/cr", json=body, timeout=60.0)
+        r.raise_for_status()
+        return r.json()
+
+    async def get_run(self, run_id: str) -> dict:
+        r = await self._http.get(
+            f"{self._agent}/analyse/cr/{run_id}",
+            params={"tenant_id": self._tenant_id},
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 # ---------------------------------------------------------------------------
@@ -155,44 +227,36 @@ class RunOutcome:
     error: Optional[str] = None
 
 
-def check_integrity(report: dict, thresholds: dict, schema: dict) -> list[str]:
+def check_integrity(report: dict, thresholds: dict) -> list[str]:
     """Return list of violation strings (empty = pass)."""
     violations: list[str] = []
 
-    summary_key = schema.get("summary_key", "summary")
-    risk_field = schema.get("risk_field", "overall_risk")
-    action_field = schema.get("action_field", "recommended_action")
-    scored_key = schema.get("scored_tests_key", "scored_tests")
-    gen_tcs_key = schema.get("generated_tcs_key", "generated_test_cases")
-    name_field = schema.get("test_name_field", "test_name")
-    id_field = schema.get("test_id_field", "test_id")
-
-    summary = report.get(summary_key) or {}
-    overall_risk = summary.get(risk_field) or "Unknown"
+    summary = report.get("summary") or {}
+    overall_risk = summary.get("overall_risk") or "Unknown"
     allowed = thresholds.get("allowed_overall_risk", ["Low"])
     if overall_risk not in allowed:
         violations.append(
-            f"{risk_field}={overall_risk!r} — expected one of {allowed}"
+            f"overall_risk={overall_risk!r} — expected one of {allowed}"
         )
 
     forbidden_actions = set(thresholds.get("forbidden_actions", ["Must Run", "Should Run"]))
-    scored = report.get(scored_key) or []
+    scored = report.get("scored_tests") or []
     bad_tests = [
         t for t in scored
-        if (t.get(action_field) or "") in forbidden_actions
+        if (t.get("recommended_action") or "") in forbidden_actions
     ]
     if bad_tests:
-        names = [t.get(name_field) or t.get(id_field) or "?" for t in bad_tests]
+        names = [t.get("test_name") or t.get("test_id") or "?" for t in bad_tests]
         violations.append(
-            f"{len(bad_tests)} test(s) have forbidden {action_field} "
+            f"{len(bad_tests)} test(s) have forbidden recommended_action "
             f"({', '.join(sorted(forbidden_actions))}): {names[:5]}"
         )
 
-    gen_tc = report.get(gen_tcs_key) or []
+    gen_tc = report.get("generated_test_cases") or []
     max_tc = thresholds.get("max_generated_test_cases", 1)
     if len(gen_tc) > max_tc:
         violations.append(
-            f"{len(gen_tc)} generated test cases — expected <= {max_tc} for a low-impact CR"
+            f"{len(gen_tc)} generated test cases — expected ≤ {max_tc} for a low-impact CR"
         )
 
     return violations
@@ -203,7 +267,7 @@ def check_integrity(report: dict, thresholds: dict, schema: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 async def run_once(
-    client: SolutionClient,
+    client: AnalyserClient,
     index: int,
     normalised_cr: dict,
     existing_tests: list,
@@ -211,21 +275,14 @@ async def run_once(
 ) -> RunOutcome:
     runner_cfg = cfg["runner"]
     thresholds = cfg["thresholds"]
-    schema = cfg.get("response_schema", {})
     base_cr_id = cfg["selector"]["cr_id"]
-
-    summary_key = schema.get("summary_key", "summary")
-    risk_field = schema.get("risk_field", "overall_risk")
-    action_field = schema.get("action_field", "recommended_action")
-    scored_key = schema.get("scored_tests_key", "scored_tests")
-    gen_tcs_key = schema.get("generated_tcs_key", "generated_test_cases")
 
     bypass = runner_cfg.get("bypass_cache", True)
     cr_id = f"{base_cr_id}#{uuid.uuid4().hex[:8]}" if bypass else base_cr_id
     started = time.monotonic()
 
     try:
-        submit = await client.submit(
+        submit = await client.submit_cr(
             cr_id=cr_id,
             normalised_cr=normalised_cr,
             existing_tests=existing_tests,
@@ -241,17 +298,16 @@ async def run_once(
             if not run_id:
                 raise RuntimeError(f"no run_id in submit response: {submit!r}")
             logger.info("run %d submitted — run_id=%s", index + 1, run_id)
-            report = await _poll(client, run_id, runner_cfg)
+            report = await poll(client, run_id, runner_cfg)
 
-        violations = check_integrity(report, thresholds, schema)
-        summary = report.get(summary_key) or {}
-        scored = report.get(scored_key) or []
-        forbidden_actions = set(thresholds.get("forbidden_actions", ["Must Run", "Should Run"]))
+        violations = check_integrity(report, thresholds)
+        summary = report.get("summary") or {}
+        scored = report.get("scored_tests") or []
         must_should = sum(
             1 for t in scored
-            if (t.get(action_field) or "") in forbidden_actions
+            if (t.get("recommended_action") or "") in {"Must Run", "Should Run"}
         )
-        gen_tc = len(report.get(gen_tcs_key) or [])
+        gen_tc = len(report.get("generated_test_cases") or [])
 
         return RunOutcome(
             index=index,
@@ -259,7 +315,7 @@ async def run_once(
             cr_id_used=cr_id,
             passed=len(violations) == 0,
             violations=violations,
-            overall_risk=summary.get(risk_field),
+            overall_risk=summary.get("overall_risk"),
             must_or_should_count=must_should,
             generated_tc_count=gen_tc,
             elapsed_sec=round(time.monotonic() - started, 2),
@@ -280,14 +336,14 @@ async def run_once(
         )
 
 
-async def _poll(client: SolutionClient, run_id: str, runner_cfg: dict) -> dict:
+async def poll(client: AnalyserClient, run_id: str, runner_cfg: dict) -> dict:
     deadline = time.monotonic() + runner_cfg.get("poll_timeout_sec", 1200.0)
     interval = runner_cfg.get("poll_interval_sec", 3.0)
     done_statuses = {"complete", "cache_hit"}
     failed_statuses = {"failed"}
 
     while True:
-        row = await client.poll(run_id)
+        row = await client.get_run(run_id)
         status = row.get("status", "unknown")
         if status in done_statuses:
             report = row.get("report")
@@ -343,12 +399,16 @@ def render_cr_section(cr_id: str, cr_title: str, outcomes: list[RunOutcome], thr
         for o in bad:
             lines.append(f"  Run {o.index + 1}:")
             for v in o.violations:
-                lines.append(f"    - {v}")
+                lines.append(f"    • {v}")
 
     return lines
 
 
 def render_report(cr_results: list[dict]) -> str:
+    """
+    cr_results is a list of dicts:
+      {"cr_id": str, "cr_title": str, "outcomes": list[RunOutcome], "thresholds": dict}
+    """
     all_outcomes = [o for r in cr_results for o in r["outcomes"]]
     total_all = len(all_outcomes)
     passed_all = sum(1 for o in all_outcomes if o.passed)
@@ -480,7 +540,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
     model_label = _provider_model_map.get(llm_label, "") or "unknown"
     llm_label = llm_label.upper() or "unknown"
 
-    # Title block
+    # ── Title block ──────────────────────────────────────────────────────────
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title.add_run("INTEGRITY HARNESS REPORT")
@@ -490,13 +550,13 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sr = sub.add_run("AI Solution Testing Harness — Multi-CR Integrity Validation")
+    sr = sub.add_run("AI Test Impact Analyser — Multi-CR Integrity Validation")
     sr.font.size = Pt(11)
     sr.font.color.rgb = rgb(BLUE)
 
     doc.add_paragraph()
 
-    # Meta table
+    # ── Meta table ───────────────────────────────────────────────────────────
     meta = doc.add_table(rows=5, cols=2)
     meta.style = "Table Grid"
     cr_list = ", ".join(f"CR-{r['cr_id']}" for r in cr_results)
@@ -521,7 +581,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
     doc.add_paragraph()
 
-    # Per-CR sections
+    # ── Per-CR sections ───────────────────────────────────────────────────────
     for r in cr_results:
         outcomes = r["outcomes"]
         cr_id    = r["cr_id"]
@@ -536,6 +596,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
         h_cr = doc.add_heading(f"CR {cr_id}  —  {cr_title}", level=2)
         h_cr.runs[0].font.color.rgb = rgb(BLUE)
 
+        # Thresholds for this CR
         thr = doc.add_table(rows=4, cols=2)
         thr.style = "Table Grid"
         for cell, text in zip(thr.rows[0].cells, ["Threshold", "Pass condition"]):
@@ -547,7 +608,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
         for thr_row, (label, value) in zip(thr.rows[1:], [
             ("overall_risk",         f"Must be one of: {t['allowed_overall_risk']}"),
             ("recommended_action",   f"No {', '.join(t['forbidden_actions'])}"),
-            ("generated_test_cases", f"<= {t['max_generated_test_cases']}"),
+            ("generated_test_cases", f"≤ {t['max_generated_test_cases']}"),
         ]):
             thr_row.cells[0].paragraphs[0].add_run(label).bold = True
             thr_row.cells[1].paragraphs[0].add_run(value)
@@ -555,6 +616,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
         doc.add_paragraph()
 
+        # Score line
         score_p = doc.add_paragraph()
         score_p.add_run("Integrity score: ").bold = True
         sc_run = score_p.add_run(f"{score:.3f}  [{band}]  —  {len(passed)} of {total} runs passed")
@@ -563,6 +625,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
         doc.add_paragraph()
 
+        # Per-run table
         results_tbl = doc.add_table(rows=len(outcomes) + 1, cols=6)
         results_tbl.style = "Table Grid"
         headers = ["Run", "Status", "Overall Risk", "Must/Should", "Gen TCs", "Time"]
@@ -595,6 +658,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
         doc.add_paragraph()
 
+        # Violations for this CR
         failed_runs = [o for o in outcomes if not o.passed]
         if failed_runs:
             h_v = doc.add_heading("Violations", level=3)
@@ -609,7 +673,7 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
                     vr.font.color.rgb = rgb(RED)
             doc.add_paragraph()
 
-    # Overall summary
+    # ── Overall summary ────────────────────────────────────────────────────────
     h_sum = doc.add_heading("Overall Summary", level=2)
     h_sum.runs[0].font.color.rgb = rgb(BLUE)
 
@@ -622,10 +686,10 @@ def render_docx(cr_results: list[dict], cfg: dict, out_path: str) -> None:
 
     if overall_score == 1.0:
         note = doc.add_paragraph()
-        note.add_run("All runs passed across all CRs. The solution performed correctly on every run.").font.color.rgb = rgb(GREEN)
+        note.add_run("All runs passed across all CRs. The analyser performed correctly on every run.").font.color.rgb = rgb(GREEN)
     else:
         note = doc.add_paragraph()
-        nr = note.add_run("One or more runs failed. Review the violations above.")
+        nr = note.add_run("One or more runs failed. Review the violations above and refer to the root cause analysis in the full investigation report.")
         nr.font.color.rgb = rgb(RED)
 
     doc.save(out_path)
@@ -641,32 +705,24 @@ async def main_async(cfg: dict) -> int:
     runner_cfg = cfg["runner"]
     iterations = runner_cfg["iterations"]
     cr_configs = cfg["crs"]  # list of {"cr_id": ..., "thresholds": ...}
-    cr_results: list[dict] = []
+    cr_results: list[dict] = []  # {"cr_id", "cr_title", "outcomes", "thresholds"}
 
-    endpoints = cfg.get("endpoints", {})
-
-    async with SolutionClient(
+    async with AnalyserClient(
         cfg["agent_base_url"],
         cfg["integration_base_url"],
         cfg["tenant_id"],
-        endpoints=endpoints,
     ) as client:
         # Health check
         try:
             await client.health()
         except Exception as exc:
             logger.error("Agent service health check failed: %s", exc)
-            logger.error("Is the stack running?")
+            logger.error("Is the stack running? Try: docker compose up -d")
             return 1
 
         # Fetch shared test cases once
         logger.info("Fetching existing test cases (tags: %s)...", sel.get("test_case_tags"))
-        existing_tests = await client.fetch_test_cases_by_tags(
-            tags=sel.get("test_case_tags") or [],
-            url=sel.get("integration_url", ""),
-            project=sel.get("integration_project", ""),
-            token=sel.get("integration_token", ""),
-        )
+        existing_tests = await client.fetch_test_cases(sel)
         logger.info("Loaded %d existing tests", len(existing_tests))
 
         # Run each CR
@@ -676,14 +732,8 @@ async def main_async(cfg: dict) -> int:
             outcomes: list[RunOutcome] = []
 
             logger.info("=" * 50)
-            logger.info("Fetching CR %s ...", cr_id)
-            cr_data = await client.fetch_cr(
-                tool=sel.get("source", "ado"),
-                cr_id=cr_id,
-                url=sel.get("integration_url", ""),
-                project=sel.get("integration_project", ""),
-                token=sel.get("integration_token", ""),
-            )
+            logger.info("Fetching CR %s from ADO...", cr_id)
+            cr_data = await client.fetch_cr(cr_id, sel)
             normalised_cr = cr_data.get("normalised_cr") or {}
             cr_title = normalised_cr.get("title", "(no title)")
             logger.info("CR title: %s", cr_title)
@@ -710,7 +760,7 @@ async def main_async(cfg: dict) -> int:
                 )
                 if outcome.violations:
                     for v in outcome.violations:
-                        logger.warning("  ! %s", v)
+                        logger.warning("  ⚠ %s", v)
                 outcomes.append(outcome)
 
             cr_results.append({
@@ -753,8 +803,8 @@ async def main_async(cfg: dict) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Integrity harness for AI solution testing")
-    parser.add_argument("--config", default="harnesses/integrity/config.json", help="Path to config JSON")
+    parser = argparse.ArgumentParser(description="Integrity harness for the AI test impact analyser")
+    parser.add_argument("--config", default="testing/integrity-harness/config.json", help="Path to config JSON")
     parser.add_argument("--iterations", type=int, default=None, help="Override number of runs")
     args = parser.parse_args()
 

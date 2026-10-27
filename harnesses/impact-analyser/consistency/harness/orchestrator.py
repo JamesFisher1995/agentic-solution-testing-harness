@@ -30,7 +30,7 @@ from .agents.base import SelectedCR
 from .agents.evaluator import ConsistencyReport, EvaluatorAgent
 from .agents.runner import RunnerAgent, RunResult
 from .agents.selector import SelectorAgent
-from shared.client import SolutionClient as AnalyserClient
+from .client import AnalyserClient
 from .config import Config, SelectorConfig
 from .report import render_summary_md, render_docx
 
@@ -96,7 +96,6 @@ class Orchestrator:
         cfg = self.cfg
         return AnalyserClient(
             cfg.agent_base_url, cfg.integration_base_url, cfg.tenant_id,
-            endpoints=cfg.endpoints,
             client=self._http_client,
         )
 
@@ -128,7 +127,7 @@ class Orchestrator:
             )
 
         logger.info("[3/3] Evaluating consistency across %d runs...", len(results))
-        report = evaluator.run(results, cfg.evaluator, schema=cfg.response_schema)
+        report = evaluator.run(results, cfg.evaluator)
 
         report_dict = report.to_dict()
         report_dict["meta"] = {

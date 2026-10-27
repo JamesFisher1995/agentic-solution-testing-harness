@@ -1,0 +1,42 @@
+{
+  "cr_id": "CR-DEMO-1001",
+  "normalised_cr": {
+    "title": "Add National Insurance number validation to the benefits claim form",
+    "description": "The benefits claim form currently accepts any text in the National Insurance (NI) number field. Add server-side and client-side validation so the field only accepts a valid UK NI number format (two letters, six digits, one suffix letter A-D). Reject invalid prefixes and show an inline error. Existing claims must not be re-validated retroactively.",
+    "acceptance_criteria": "GIVEN a claimant on the claim form WHEN they enter an NI number THEN it is validated against the UK NI format before submission. GIVEN an invalid NI number WHEN the claimant submits THEN an inline error is shown and submission is blocked. GIVEN a valid NI number WHEN the claimant submits THEN the claim proceeds. Existing submitted claims are not affected.",
+    "labels": ["benefits", "validation", "claim-form"]
+  },
+  "existing_tests": [
+    {
+      "test_id": "TC-501",
+      "test_name": "Submit claim form with all valid fields",
+      "description": "End-to-end happy path: complete the claim form with valid data and submit successfully.",
+      "component_tags": ["claim-form", "benefits"]
+    },
+    {
+      "test_id": "TC-502",
+      "test_name": "NI number field accepts free text",
+      "description": "Legacy test asserting the NI field accepts arbitrary text (will need updating after this CR).",
+      "component_tags": ["claim-form", "validation"]
+    },
+    {
+      "test_id": "TC-503",
+      "test_name": "Inline field validation errors render correctly",
+      "description": "Verify that inline error messages appear next to invalid form fields.",
+      "component_tags": ["claim-form", "validation"]
+    },
+    {
+      "test_id": "TC-504",
+      "test_name": "Existing claims remain unchanged after deploy",
+      "description": "Verify that previously submitted claims are not re-validated or altered.",
+      "component_tags": ["benefits"]
+    },
+    {
+      "test_id": "TC-505",
+      "test_name": "Payment calculation for standard claim",
+      "description": "Unrelated: verify the payment engine computes the correct standard award.",
+      "component_tags": ["payments"]
+    }
+  ],
+  "related_user_stories": []
+}

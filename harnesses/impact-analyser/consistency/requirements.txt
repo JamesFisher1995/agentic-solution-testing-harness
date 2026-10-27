@@ -1,0 +1,5 @@
+# Runtime dependency — the harness only speaks HTTP.
+httpx>=0.27
+
+# Dev / test only (the local fakes-based suite):
+pytest>=8

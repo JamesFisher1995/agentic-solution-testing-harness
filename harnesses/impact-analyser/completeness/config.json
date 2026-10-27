@@ -2,7 +2,7 @@
   "agent_base_url": "http://localhost:8000",
   "integration_base_url": "http://localhost:3001",
   "tenant_id": "00000000-0000-0000-0000-000000000001",
-  "output_dir": "runs/completeness",
+  "output_dir": "testing/completeness-harness/runs",
 
   "selector": {
     "source": "ado",
@@ -30,7 +30,7 @@
       "cr_id": "159",
       "label": "CR-012",
       "gold_standard": {
-        "rationale": "Cross-cutting GOV.UK Design System migration affects every page.",
+        "rationale": "Cross-cutting GOV.UK Design System migration affects every page — header, footer, typography, spacing all change. All tests that exercise any rendered page should be Must Run or Should Run.",
         "must_flag": [
           "TC-001: UI Components Verification",
           "TC-002: Happy Path Application Submission",
@@ -45,14 +45,17 @@
           "TC-007: Progress Indicator Consistency",
           "TC-009: Layout - Responsive Design"
         ],
-        "must_find_gaps": ["Step 3", "Step 4"]
+        "must_find_gaps": [
+          "Step 3",
+          "Step 4"
+        ]
       }
     },
     {
       "cr_id": "161",
       "label": "CR-014",
       "gold_standard": {
-        "rationale": "Critical security fix — personal data exposed in URL parameters.",
+        "rationale": "Critical security fix — personal data (email, NI number) was exposed in URL parameters on Steps 1–3. Any test covering form submission, personal details input, or the confirmation page must be flagged. These are the tests most likely to catch a regression if POST body submission breaks.",
         "must_flag": [
           "TC-002: Happy Path Application Submission",
           "TC-004: Validation - Step 1: Personal Details",
@@ -65,7 +68,10 @@
           "TC-005: Validation - Step 2: Contact Information",
           "TC-010: Confirmation Page Summary Details"
         ],
-        "must_find_gaps": ["Step 3", "Data transmission"]
+        "must_find_gaps": [
+          "Step 3",
+          "Data transmission"
+        ]
       }
     }
   ]
