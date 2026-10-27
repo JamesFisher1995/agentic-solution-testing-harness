@@ -66,11 +66,18 @@ def _check_required_sections(output: str) -> tuple[bool, list[str]]:
 
 def _check_steps_have_expected(output: str) -> tuple[bool, list[str]]:
     issues = []
-    # Find step table rows: | N | action | expected |
-    rows = re.findall(r"\|\s*\d+\s*\|([^|]+)\|([^|]+)\|", output)
-    for i, (action, expected) in enumerate(rows):
-        if not expected.strip() or expected.strip() == "—":
-            issues.append(f"Step {i+1} missing expected result")
+    # Check each TC's final step has a real expected result (not blank/dash)
+    # Setup steps legitimately use "—" so we only flag the last step per TC
+    tcs = re.split(r"###\s+TC-\d+", output)[1:]
+    for tc_idx, tc in enumerate(tcs):
+        rows = re.findall(r"\|\s*(\d+)\s*\|([^|]+)\|([^|]+)\|", tc)
+        if not rows:
+            issues.append(f"TC-{tc_idx+1} has no step rows at all")
+            continue
+        # Check the last step only
+        last_num, last_action, last_expected = rows[-1]
+        if not last_expected.strip() or last_expected.strip() in ("—", "-", ""):
+            issues.append(f"TC-{tc_idx+1} final step has no expected result")
     return len(issues) == 0, issues
 
 
