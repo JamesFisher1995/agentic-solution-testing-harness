@@ -1,0 +1,21 @@
+{
+  "label": "New feature — 10 miles search option",
+  "key": "EXAMPLE-1",
+  "ticket": "Add a 10 miles option to the location search area\n\nType: Story\nComponents: Find monitoring stations by location\n\nAs a user searching for monitoring stations, I want a 10 mile search area so that I can see stations close to me without the long list that 25 miles gives.\n\nAcceptance criteria:\n1. The 'Approximate search area' options are 5 miles, 10 miles, 25 miles and 50 miles, in that order.\n2. 50 miles remains the default selection.\n3. Selecting 10 miles and searching shows only stations within 10 miles, and the heading reads 'Monitoring stations within 10 miles of <place>'.\n4. If there are no stations within 10 miles, the existing 'There are no monitoring stations within 10 miles of <place>' page is shown.\n5. 'Change search area' returns the user to the search form.",
+  "gold_standard": {
+    "rationale": "New feature with 5 explicit ACs — every AC must have at least one test case. Should cover happy path, default selection, correct heading, no-results state, and back navigation.",
+    "must_identify": {
+      "components": ["Find monitoring stations by location"],
+      "derived_ac_count_min": 5
+    },
+    "must_include_types": ["Positive", "Negative"],
+    "must_cover_scenarios": [
+      "10 miles option appears in the correct order",
+      "50 miles is still the default",
+      "heading shows correct distance after selecting 10 miles",
+      "no stations within 10 miles shows correct message",
+      "Change search area returns to search form"
+    ],
+    "must_not_invent": ["screen names", "button labels", "error messages"]
+  }
+}

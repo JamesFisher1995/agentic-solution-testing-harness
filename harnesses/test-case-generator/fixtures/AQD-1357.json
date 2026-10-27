@@ -1,0 +1,19 @@
+{
+  "label": "New network — Automatic Hydrocarbon Network",
+  "key": "AQD-1357",
+  "ticket": "AQD-1357: Automatic Hydrocarbon Network - NEW NETWORK | Custom Selections Reflections\n\nAcceptance criteria:\n\n1. New Network: Automatic Hydrocarbon Network\n\n2. Applicable pollutants:\nMethanol, Ethanol, Ethane, Ethene, Ethyne, Propane, Propene, Iso-butane, N-butane, 1-Butene, Iso-butene, Trans-2-butene, Cis-2-butene, 1,3-Butadiene, Iso-pentane, N-pentane, 1-Pentene, Trans-2-pentene, Cis-2-pentene, 2-Methylpentane, 3-Methylpentane, 2+3-Methylpentane, Isoprene, Cyclopentane, N-hexane, N-heptane, Iso-octane, N-octane, N-nonane, Benzene, Toluene, Ethylbenzene, M-xylene, P-xylene, M+p-xylene, O-xylene, 1,2,3-Trimethylbenzene, 1,2,4-Trimethylbenzene, 1,3,5-Trimethylbenzene, Acetaldehyde, Acetone\n\n3. If any of the applicable pollutants are selected (individually or as multiple selections), 'Automatic Hydrocarbon Network' is to be included as part of the data source, displayed under 'Near real-time data from Defra'.\n\n4. If none of the applicable pollutants are selected, 'Automatic Hydrocarbon Network' is NOT to be included as part of the data source.",
+  "gold_standard": {
+    "rationale": "New network addition — must cover the happy path (applicable pollutant selected → network appears), negative path (non-applicable pollutant selected → network absent), and multiple applicable pollutants selected together.",
+    "must_identify": {
+      "components": ["Create a custom dataset"],
+      "derived_ac_count_min": 3
+    },
+    "must_include_types": ["Positive", "Negative"],
+    "must_cover_scenarios": [
+      "selecting an applicable pollutant shows Automatic Hydrocarbon Network under Near real-time data from Defra",
+      "selecting multiple applicable pollutants shows Automatic Hydrocarbon Network once",
+      "selecting a pollutant not in the applicable list does not show Automatic Hydrocarbon Network"
+    ],
+    "must_not_invent": ["screen names", "button labels", "error messages"]
+  }
+}

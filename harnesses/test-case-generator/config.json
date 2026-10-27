@@ -1,0 +1,28 @@
+{
+  "agent_base_url": "http://localhost:8001",
+  "output_dir": "runs/test-case-generator/completeness",
+
+  "runner": {
+    "iterations": 3,
+    "poll_timeout_sec": 60.0
+  },
+
+  "evaluator": {
+    "weights": {
+      "ac_coverage":       0.40,
+      "type_coverage":     0.25,
+      "scenario_coverage": 0.25,
+      "no_invention":      0.10
+    },
+    "thresholds": {
+      "pass_min": 0.80
+    }
+  },
+
+  "fixtures": [
+    { "label": "Content change — remove hint text",    "file": "harnesses/test-case-generator/fixtures/AQD-1196.json" },
+    { "label": "New feature — 10 miles search option", "file": "harnesses/test-case-generator/fixtures/EXAMPLE-1.json" },
+    { "label": "Bug fix — disambiguation choice",      "file": "harnesses/test-case-generator/fixtures/BUG-001.json" },
+    { "label": "New network — Automatic Hydrocarbon",  "file": "harnesses/test-case-generator/fixtures/AQD-1357.json" }
+  ]
+}

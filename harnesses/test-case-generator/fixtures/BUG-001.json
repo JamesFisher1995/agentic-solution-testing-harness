@@ -1,0 +1,19 @@
+{
+  "label": "Bug fix — disambiguation choice ignored",
+  "key": "BUG-001",
+  "ticket": "Bug fix: disambiguation choice is ignored; results always use the first match\n\nType: Bug\nComponents: Find monitoring stations by location\n\nCurrent behaviour: When a user searches for an ambiguous place name (e.g. 'Newport') and selects a specific result from the disambiguation list (e.g. 'Newport, Isle of Wight'), the results page always shows stations for the first item in the list (Newport, Wales) regardless of the user's choice.\n\nExpected behaviour: The results page should show stations within the selected radius of the place the user chose from the disambiguation list.",
+  "gold_standard": {
+    "rationale": "Bug fix — must include a test that reproduces the original defect (now fixed), plus variations to confirm the fix works for multiple ambiguous names.",
+    "must_identify": {
+      "components": ["Find monitoring stations by location"],
+      "derived_ac_count_min": 1
+    },
+    "must_include_types": ["Positive", "Negative"],
+    "must_cover_scenarios": [
+      "selecting Newport Isle of Wight shows stations near Isle of Wight not Wales",
+      "selecting a non-first disambiguation result returns correct stations",
+      "heading shows the chosen place name not the first match"
+    ],
+    "must_not_invent": ["screen names", "button labels", "error messages"]
+  }
+}

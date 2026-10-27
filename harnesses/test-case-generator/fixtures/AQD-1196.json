@@ -1,0 +1,18 @@
+{
+  "label": "Content change — remove hint text",
+  "key": "AQD-1196",
+  "ticket": "content change - remove 'choose how you want to add years' text on Add time period page\n\nCurrent behaviour: the add time period page has text under title and but above the options saying 'Choose how you want to add years'\n\nExpected behaviour: this text shouldn't be there",
+  "gold_standard": {
+    "rationale": "Simple content removal — should produce at least one positive test confirming the text is gone, one error-state test, and an accessibility check.",
+    "must_identify": {
+      "components": ["Add time period"],
+      "derived_ac_count_min": 1
+    },
+    "must_include_types": ["Positive", "Accessibility"],
+    "must_cover_scenarios": [
+      "text is not shown on the Add time period page",
+      "accessibility checker run on the changed page"
+    ],
+    "must_not_invent": ["screen names", "button labels", "error messages"]
+  }
+}
